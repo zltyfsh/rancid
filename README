@@ -68,6 +68,7 @@ bin/
 	srancid.in	Version of rancid.in for SMC switches.
 	tntrancid.in	Version of rancid.in for TNT access servers.
 	xrancid.in	Version of rancid.in for Extreme switches.
+	xrrancid.in	Version of rancid.in for Cisco IOS-XR routers.
 	zrancid.in	Version of rancid.in for Zebra routers.
 
 	alogin.in	Version of clogin.in for Alteon switches.
