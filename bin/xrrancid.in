@@ -1,5 +1,7 @@
 #! @PERLV_PATH@
 ##
+## $Id: xrrancid.in 2369 2012-01-30 21:06:03Z heas $
+##
 ## @PACKAGE@ @VERSION@
 ## Copyright (c) 1997-2010 by Terrapin Communications, Inc.
 ## All rights reserved.
@@ -215,7 +217,6 @@ sub ShowLicense {
   return(0);
 }
 
-
 # This routine parses "admin show variables boot"
 sub ShowBootVar {
   print STDERR "    In ShowBootVar: $_" if ($debug);
@@ -357,8 +358,6 @@ sub ShowPlatform {
   return(0);
 }
 
-
-
 # This routine parses "show version"
 sub ShowVersion {
   print STDERR "    In ShowVersion: $_" if ($debug);
@@ -461,6 +460,25 @@ sub ShowInventory {
   return(0);
 }
 
+# This routine parses "show rpl maximum"
+sub ShowRPL {
+    print STDERR "    In ShowRPL: $_" if ($debug);
+
+    while (<INPUT>) {
+	tr/\015//d;
+	last if (/^$prompt/);
+	next if (/^(\s*|\s*$cmd\s*)$/);
+	return(1) if /^\s*\^\s*$/;
+	return(1) if (/Line has invalid autocommand /);
+	return(1) if (/(Invalid (input|command) detected|Type help or )/i);
+	return(1) if (/Ambiguous command/i);
+	return(-1) if (/command authorization failed/i);
+
+	ProcessHistory("COMMENTS","keysort","RPLMAX","! $_");
+    }
+    ProcessHistory("COMMENTS","keysort","RPLMAX","!\n");
+    return(0);
+}
 
 # This routine parses "show dsc all"
 sub ShowDSC {
@@ -869,6 +887,9 @@ sub DoNothing {print STDOUT;}
  {'admin show processes aborts location all' => 'ShowProcessAborts'},
  {'admin show context location all'          => 'ShowContext'},
 
+ # HARDWARE LIMITS
+ {'show rpl maximum'		=> 'ShowRPL'},
+
  # RUNNING-CONFIG commands
  {'admin show running-config'   => 'AdminShowRunning'},
  {'show running-config'		=> 'WriteTerm'},
@@ -909,7 +930,7 @@ if ($file) {
 } else {
   print STDERR "executing clogin -autoenable -t $timeo -c\"$cisco_cmds\" $host\n" if ($debug);
   print STDOUT "executing clogin -autoenable -t $timeo -c\"$cisco_cmds\" $host\n" if ($log);
-  if (defined($ENV{NOPIPE})) {
+  if (defined($ENV{NOPIPE}) && $ENV{NOPIPE} =~ /^YES/i) {
     system "clogin -autoenable -t $timeo -c \"$cisco_cmds\" $host </dev/null > $host.raw 2>&1" 
       or die "clogin failed for $host: $!\n";
     open(INPUT, "< $host.raw") 
@@ -1023,7 +1044,7 @@ ProcessHistory("","","","");
 close(INPUT);
 close(OUTPUT);
 
-if (defined($ENV{NOPIPE})) {
+if (defined($ENV{NOPIPE}) && $ENV{NOPIPE} =~ /^YES/i) {
     unlink("$host.raw") if (! $debug);
 }
 
