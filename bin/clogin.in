@@ -914,6 +914,12 @@ foreach router [lrange $argv $i end] {
 		send "terminal length 0\r"
 		expect -re $prompt  	{}
 		send "terminal width 132\r"
+		expect -re $prompt  	{}
+		send "terminal no exec prompt timestamp\r"   # IOS
+		expect -re $prompt  	{}
+		send "terminal no-timestamps\r"              # IOS XR <=3.6
+		expect -re $prompt  	{}
+		send "terminal exec prompt no-timestamp\r"   # IOS XR >3.6
 	    }
 	    expect -re $prompt		{}
 	} else {

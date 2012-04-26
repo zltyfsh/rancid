@@ -1,3 +1,7 @@
+2.3.8+hemmop1
+        rancid, xrrancid: moved disabling of terminal timestamp
+        prompt to clogin
+
 2.3.8
 	rancid: filter sup-bootflash if sup-bootdisk worked
 
