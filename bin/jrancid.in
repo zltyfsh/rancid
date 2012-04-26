@@ -1,0 +1,624 @@
+#! @PERLV_PATH@
+##
+## $Id: jrancid.in,v 1.61 2004/06/05 04:02:08 asp Exp $
+##
+## Copyright (C) 1997-2004 by Terrapin Communications, Inc.
+## All rights reserved.
+##
+## This software may be freely copied, modified and redistributed
+## without fee for non-commerical purposes provided that this license
+## remains intact and unmodified with any RANCID distribution.
+##
+## There is no warranty or other guarantee of fitness of this software.
+## It is provided solely "as is".  The author(s) disclaim(s) all
+## responsibility and liability with respect to this software's usage
+## or its effect upon hardware, computer systems, other software, or
+## anything else.
+##
+## Except where noted otherwise, rancid was written by and is maintained by
+## Henry Kilmer, John Heasley, Andrew Partan, Pete Whiting, and Austin Schutz.
+##
+#
+# Amazingly hacked version of Hank's rancid - this one tries to
+# deal with Junipers.
+#
+#  RANCID - Really Awesome New Cisco confIg Differ
+#
+# usage: jrancid [-d] [-l] [-f filename | $host]
+#
+use Getopt::Std;
+getopts('dfl');
+$debug = $opt_d;
+$log = $opt_l;
+$file = $opt_f;
+$host = $ARGV[0];
+
+$clean_run = 0;
+$found_end = 0;
+
+my(%filter_pwds);		# password filtering mode
+
+# This routine is used to print out the router configuration
+sub ProcessHistory {
+    my($new_hist_tag,$new_command,$command_string,@string)=(@_);
+    if((($new_hist_tag ne $hist_tag) || ($new_command ne $command))
+       && defined %history) {
+	print eval "$command \%history";
+	undef %history;
+    }
+    if (($new_hist_tag) && ($new_command) && ($command_string)) {
+	if ($history{$command_string}) {
+	    $history{$command_string} = "$history{$command_string}@string";
+	} else {
+	    $history{$command_string} = "@string";
+	}
+    } elsif (($new_hist_tag) && ($new_command)) {
+	$history{++$#history} = "@string";
+    } else {
+	print "@string";
+    }
+    $hist_tag = $new_hist_tag;
+    $command = $new_command;
+    1;
+}
+
+sub numerically { $a <=> $b; }
+
+# This is a sort routing that will sort numerically on the
+# keys of a hash as if it were a normal array.
+sub keynsort {
+    local(%lines)=@_;
+    local($i) = 0;
+    local(@sorted_lines);
+    foreach $key (sort numerically keys(%lines)) {
+	$sorted_lines[$i] = $lines{$key};
+	$i++;
+    }
+    @sorted_lines;
+}
+
+# This is a sort routing that will sort on the
+# keys of a hash as if it were a normal array.
+sub keysort {
+    local(%lines)=@_;
+    local($i) = 0;
+    local(@sorted_lines);
+    foreach $key (sort keys(%lines)) {
+	$sorted_lines[$i] = $lines{$key};
+	$i++;
+    }
+    @sorted_lines;
+}
+
+# This is a sort routing that will sort on the
+# values of a hash as if it were a normal array.
+sub valsort{
+    local(%lines)=@_;
+    local($i) = 0;
+    local(@sorted_lines);
+    foreach $key (sort values %lines) {
+        $sorted_lines[$i] = $key;
+        $i++;
+    }
+    @sorted_lines;
+}
+
+# This is a numerical sort routing (ascending).
+sub numsort {
+    local(%lines)=@_;
+    local($i) = 0;
+    local(@sorted_lines);
+    foreach $num (sort {$a <=> $b} keys %lines) {
+	$sorted_lines[$i] = $lines{$num};
+	$i++;
+    }
+    @sorted_lines;
+}
+
+# This is a sort routine that will sort on the
+# ip address when the ip address is anywhere in
+# the strings.
+sub ipsort {
+    local(%lines)=@_;
+    local($i) = 0;
+    local(@sorted_lines);
+    foreach $addr (sort sortbyipaddr keys %lines) {
+	$sorted_lines[$i] = $lines{$addr};
+	$i++;
+    }
+    @sorted_lines;
+}
+
+# These two routines will sort based upon IP addresses
+sub ipaddrval {
+    my(@a) = ($_[0] =~ m#^(\d+)\.(\d+)\.(\d+)\.(\d+)$#);
+    $a[3]+256*($a[2]+256*($a[1]+256*$a[0]));
+}
+sub sortbyipaddr {
+    &ipaddrval($a) <=> &ipaddrval($b);
+}
+
+###
+### Start of real work
+###
+
+# This routine parses "show chassis clocks"
+sub ShowChassisClocks {
+    print STDERR "    In ShowChassisClocks: $_" if ($debug);
+
+    s/^[a-z]+@//;
+    ProcessHistory("","","","# $_");
+    while (<INPUT>) {
+	tr/\015//d;
+	last if(/^$prompt/);
+	next if(/^system (shutdown message from|going down )/i);
+	next if(/^\{(master|backup)}/);
+
+	/error: the chassis subsystem is not running/ && return;
+	/Couldn\'t initiate connection/ && return;
+	/Unrecognized command/ && return;
+	/command is not valid/ && return;
+	/^\s+\^/ && return;
+	/syntax error/ && return;
+
+	# filter decimal places of m160 measured clock MHz
+	/Measured frequency/ && s/\..*MHz/ MHz/;
+	ProcessHistory("","","","# $_");
+    }
+    return;
+}
+
+# This routine parses "show chassis environment"
+sub ShowChassisEnvironment {
+    print STDERR "    In ShowChassisEnvironment: $_" if ($debug);
+
+    s/^[a-z]+@//;
+    ProcessHistory("","","","# $_");
+    while (<INPUT>) {
+	tr/\015//d;
+	last if(/^$prompt/);
+	next if(/^system (shutdown message from|going down )/i);
+	next if(/^\{(master|backup)}/);
+
+	/error: the chassis subsystem is not running/ && return;
+	/Couldn\'t initiate connection/ && return;
+	/Unrecognized command/ && return;
+	/command is not valid/ && return;
+	/^\s+\^/ && return;
+	/syntax error/ && return;
+	/ backplane temperature/ && next;
+	/(\s*Power supply.*), temperature/ &&
+		ProcessHistory("","","","# $1\n") && next;
+	/(\s*.+) +\d+ degrees C.*$/ &&
+		ProcessHistory("","","","# $1\n") && next;
+	/(^.*\S)\s+ Spinning at .*$/ &&
+		ProcessHistory("","","","# $1\n") && next;
+	ProcessHistory("","","","# $_");
+    }
+    return;
+}
+
+# This routine parses "show chassis firmware"
+sub ShowChassisFirmware {
+    print STDERR "    In ShowChassisFirmware: $_" if ($debug);
+
+    s/^[a-z]+@//;
+    ProcessHistory("","","","# $_");
+    while (<INPUT>) {
+	tr/\015//d;
+	last if(/^$prompt/);
+	next if(/^system (shutdown message from|going down )/i);
+	next if(/^\{(master|backup)}/);
+
+	/error: the chassis subsystem is not running/ && return;
+	/Couldn\'t initiate connection/ && return;
+	/Unrecognized command/ && return;
+	/command is not valid/ && return;
+	/^\s+\^/ && return;
+	/syntax error/ && return;
+	ProcessHistory("","","","# $_");
+    }
+    return;
+}
+
+# This routine parses "show chassis fpc detail"
+sub ShowChassisFpcDetail {
+    print STDERR "    In ShowChassisFpcDetail: $_" if ($debug);
+
+    s/^[a-z]+@//;
+    ProcessHistory("","","","# $_");
+    while (<INPUT>) {
+	tr/\015//d;
+	last if(/^$prompt/);
+	next if(/^system (shutdown message from|going down )/i);
+	next if(/^\{(master|backup)}/);
+
+	/error: the chassis subsystem is not running/ && return;
+	/Couldn\'t initiate connection/ && return;
+	/Unrecognized command/ && return;
+	/command is not valid/ && return;
+	/^\s+\^/ && return;
+	/syntax error/ && return;
+	/ Temperature/ && next;
+	/ Start time/ && next;
+	/ Uptime/ && next;
+	ProcessHistory("","","","# $_");
+    }
+    return;
+}
+
+# This routine parses "show chassis hardware"
+sub ShowChassisHardware {
+    print STDERR "    In ShowChassisHardware: $_" if ($debug);
+
+    s/^[a-z]+@//;
+    ProcessHistory("","","","# $_");
+    while (<INPUT>) {
+	tr/\015//d;
+	last if(/^$prompt/);
+	next if(/^system (shutdown message from|going down )/i);
+	next if(/^\{(master|backup)}/);
+
+	/error: the chassis subsystem is not running/ && return;
+	/Couldn\'t initiate connection/ && return;
+	/Unrecognized command/ && return;
+	/command is not valid/ && return;
+	/^\s+\^/ && return;
+	/syntax error/ && return;
+	ProcessHistory("","","","# $_");
+    }
+    return;
+}
+
+# This routine parses "show chassis routing-engine"
+# Most output is ignored.
+sub ShowChassisRoutingEngine {
+    print STDERR "    In ShowChassisRoutingEngine: $_" if ($debug);
+
+    s/^[a-z]+@//;
+    ProcessHistory("","","","# $_");
+    while (<INPUT>) {
+	tr/\015//d;
+	last if(/^$prompt/);
+	next if(/^system (shutdown message from|going down )/i);
+	next if(/^\{(master|backup)}/);
+
+	/error: the chassis subsystem is not running/ && return;
+	/Couldn\'t initiate connection/ && return;
+	/Unrecognized command/ && return;
+	/command is not valid/ && return;
+	/^\s+\^/ && return;
+	/syntax error/ && return;
+	/^Routing Engine status:/ && ProcessHistory("","","","# $_") && next;
+	/ Slot / && ProcessHistory("","","","# $_") && next;
+	/ Current state/ && ProcessHistory("","","","# $_") && next;
+	/ Election priority/ && ProcessHistory("","","","# $_") && next;
+	/ DRAM/ && ProcessHistory("","","","# $_") && next;
+	/ Serial ID/ && ProcessHistory("","","","# $_") && next;
+	/^\s*$/ && ProcessHistory("","","","# $_") && next;
+    }
+    return;
+}
+
+# This routine parses "show chassis cfeb", "show chassis feb", "show
+# chassis scb", "show chassis sfm detail", and "show chassis ssb".
+# Only do this routine once.
+sub ShowChassisSCB {
+    print STDERR "    In ShowChassisSCB: $_" if ($debug);
+
+    s/^[a-z]+@//;
+    ProcessHistory("","","","# $_");
+    while (<INPUT>) {
+	tr/\015//d;
+	last if(/^$prompt/);
+	next if(/^system (shutdown message from|going down )/i);
+	next if(/^\{(master|backup)}/);
+
+	return if ($ShowChassisSCB);
+	/error: the chassis subsystem is not running/ && return;
+	/Couldn\'t initiate connection/ && return;
+	/Unrecognized command/ && return;
+	/command is not valid/ && return;
+	/^\s+\^/ && return;
+	/syntax error/ && return;
+	/ Temperature/ && next;
+	/ temperature/ && next;
+	/ utilization/ && next;
+	/ Start time/ && next;
+	/ Uptime/ && next;
+	/ (IP|MLPS) routes:/ && next;
+	/ used:/ && next;
+	ProcessHistory("","","","# $_");
+    }
+    $ShowChassisSCB = 1;
+    return;
+}
+
+# This routine parses "show system boot-messages"
+sub ShowChassisAlarms {
+    print STDERR "    In ShowChassisAlarms: $_" if ($debug);
+
+    s/^[a-z]+@//;
+    ProcessHistory("","","","# $_");
+    while (<INPUT>) {
+	tr/\015//d;
+	last if(/^$prompt/);
+	next if(/^system (shutdown message from|going down )/i);
+	next if(/^\{(master|backup)}/);
+
+	/Unrecognized command/ && return;
+	/^\s+\^/ && return;
+	/syntax error/ && return;
+	ProcessHistory("","","","# $_");
+    }
+    return;
+}
+
+# This routine parses "show system boot-messages"
+sub ShowSystemBootMessages {
+    print STDERR "    In ShowSystemBootMessages: $_" if ($debug);
+
+    s/^[a-z]+@//;
+    ProcessHistory("","","","# $_");
+    while (<INPUT>) {
+	tr/\015//d;
+	last if(/^$prompt/);
+	next if(/^system (shutdown message from|going down )/i);
+	next if(/^\{(master|backup)}/);
+
+	/Unrecognized command/ && return;
+	/^\s+\^/ && return;
+	/syntax error/ && return;
+	/^JUNOS / && <INPUT> && next;
+	/^Timecounter "TSC" / && next;
+	/^real memory / && next;
+	/^avail memory / && next;
+	/^\/dev\// && next;
+	ProcessHistory("","","","# $_");
+    }
+    return;
+}
+
+# This routine parses "show version"
+sub ShowVersion {
+    print STDERR "    In ShowVersion: $_" if ($debug);
+
+    s/^[a-z]+@//;
+    ProcessHistory("","","","# $_");
+    while (<INPUT>) {
+	tr/\015//d;
+	last if(/^$prompt/);
+	next if(/^\s*$/);
+	next if(/^system (shutdown message from|going down )/i);
+	next if(/^\{(master|backup)}/);
+
+	/^Juniper Networks is:/ && ProcessHistory("","","","# \n# $_") && next;
+	ProcessHistory("","","","# $_");
+    }
+    ProcessHistory("","","","#\n");
+
+    return;
+}
+
+# This routine parses "show configuration"
+sub ShowConfiguration {
+    my($lines) = 0;
+    my($snmp) = 0;
+    print STDERR "    In ShowConfiguration: $_" if ($debug);
+
+    s/^[a-z]+@//;
+    ProcessHistory("","","","# $_");
+    while (<INPUT>) {
+	tr/\015//d;
+	next if (/^\s*$/);
+        # end of config - hopefully.  juniper does not have a reliable
+	# end-of-config tag.  appears to end with "\nPROMPT>", but not sure.
+	if(/^$prompt/) {
+	    $found_end++;
+	    last;
+	}
+	next if(/^system (shutdown message from|going down )/i);
+	next if(/^\{(master|backup)}/);
+	$lines++;
+
+	/^database header mismatch: / && return(-1);
+	/^version .*;\d+$/ && return(-1);
+
+	s/ # SECRET-DATA$//;
+	s/ ## SECRET-DATA$//;
+	# filter snmp community, when in snmp { stanza }
+	/^snmp/ && $snmp++;
+	/^}/ && ($snmp = 0);
+	if ($snmp && /^(\s*)(community|trap-group) [^ ;]+(\s?[;{])$/) {
+		if (defined($ENV{'NOCOMMSTR'})) {
+		    $_ = "$1$2 \"<removed>\"$3\n";
+		}
+	}
+	if (/(\s*authentication-key )[^ ;]+/ && $filter_pwds >= 1) {
+	    ProcessHistory("","","","#$1<removed>$'");
+	    next;
+	}
+	if (/(\s*md5 \d+ key )[^ ;]+/ && $filter_pwds >= 1) {
+	    ProcessHistory("","","","#$1<removed>$'");
+	    next;
+	}
+	if (/(\s*hello-authentication-key )[^ ;]+/ && $filter_pwds >= 1) {
+	    ProcessHistory("","","","#$1<removed>$'");
+	    next;
+	}
+	if (/^(.*\ssecret )[^ ;]+/ && $filter_pwds >= 1) {
+	    ProcessHistory("","","","#$1<removed>$'");
+	    next;
+	}
+	if (/(\s+encrypted-password )[^ ;]+/ && $filter_pwds >= 2) {
+	    ProcessHistory("","","","#$1<removed>$'");
+	    next;
+	}
+	if (/(\s+ssh-(rsa|dsa) )\"/ && $filter_pwds >= 2) {
+	    ProcessHistory("","","","#$1<removed>;\n");
+	    next;
+	}
+	if (/^(\s+(pre-shared-|)key (ascii-text|hexadecimal) )[^ ;]+/ && $filter_pwds >= 1) {
+	    ProcessHistory("","","","#$1<removed>$'");
+	    next;
+	}
+	ProcessHistory("","","","$_");
+    }
+
+    if ($lines < 3) {
+	printf(STDERR "ERROR: $host configuration appears truncated.\n");
+	$found_end = 0;
+	return(-1);
+    }
+
+    return;
+}
+
+###
+### End of real work
+###
+
+# dummy function
+sub DoNothing {print STDOUT;}
+
+# Main
+%commands=(
+	"show chassis clocks"		=> "ShowChassisClocks",
+	"show chassis environment"	=> "ShowChassisEnvironment",
+	"show chassis firmware"		=> "ShowChassisFirmware",
+	"show chassis fpc detail"	=> "ShowChassisFpcDetail",
+	"show chassis hardware detail"	=> "ShowChassisHardware",
+	"show chassis routing-engine"	=> "ShowChassisRoutingEngine",
+	"show chassis scb"		=> "ShowChassisSCB",
+	"show chassis sfm detail"	=> "ShowChassisSCB",
+	"show chassis ssb"		=> "ShowChassisSCB",
+	"show chassis feb"		=> "ShowChassisSCB",
+	"show chassis cfeb"		=> "ShowChassisSCB",
+	"show chassis alarms"		=> "ShowChassisAlarms",
+	"show system boot-messages"	=> "ShowSystemBootMessages",
+	"show version detail"		=> "ShowVersion",
+	"show configuration"		=> "ShowConfiguration"
+);
+@commands=(
+	"show chassis clocks",
+	"show chassis environment",
+	"show chassis firmware",
+	"show chassis fpc detail",
+	"show chassis hardware detail",
+	"show chassis routing-engine",
+	"show chassis scb",
+	"show chassis sfm detail",
+	"show chassis ssb",
+	"show chassis feb",
+	"show chassis cfeb",
+	"show chassis alarms",
+	"show system boot-messages",
+	"show version detail",
+	"show configuration"
+);
+
+$jnx_commands=join(";",@commands);
+$cmds_regexp=join("|",@commands);
+
+open(OUTPUT,">$host.new") || die "Can't open $host.new for writing: $!\n";
+select(OUTPUT);
+# make OUTPUT unbuffered
+if ($debug) { $| = 1; }
+
+if ($file) {
+    print STDERR "opening file $host\n" if ($debug);
+    print STDOUT "opening file $host\n" if ($log);
+    open(INPUT,"< $host") || die "open failed for $host: $!\n";
+} else {
+    print(STDERR "executing echo jlogin -c\"$jnx_commands\" $host\n") if ($debug);
+    print(STDOUT "executing echo jlogin -c\"$jnx_commands\" $host\n") if ($debug);
+
+    if (defined($ENV{NOPIPE})) {
+	system "jlogin -c \"$jnx_commands\" $host </dev/null > $host.raw" || die "jlogin failed for $host: $!\n";
+	open(INPUT, "< $host.raw") || die "jlogin failed for $host: $!\n";
+    } else {
+	open(INPUT,"jlogin -c \"$jnx_commands\" $host </dev/null |") || die "jlogin failed for $host: $!\n";
+    }
+
+}
+
+# determine password filtering mode
+if ($ENV{"FILTER_PWDS"} =~ /no/i) {
+	$filter_pwds = 0;  
+} elsif ($ENV{"FILTER_PWDS"} =~ /all/i) {
+	$filter_pwds = 2;
+} else {
+	$filter_pwds = 1;
+}
+
+ProcessHistory("","","","# RANCID-CONTENT-TYPE: juniper\n#\n");
+TOP: while(<INPUT>) {
+    tr/\015//d;
+    if (/^Error:/) {
+	print STDOUT ("$host jlogin error: $_");
+	print STDERR ("$host jlogin error: $_") if ($debug);
+	$clean_run=0;
+	last;
+    }
+    if (/System shutdown message/) {
+	print STDOUT ("$host shutdown msg: $_");
+	print STDERR ("$host shutdown msg: $_") if ($debug);
+	$clean_run = 0;
+	last;
+    }
+    if (/error: cli version does not match Managment Daemon/i) {
+	print STDOUT ("$host mgd version mismatch: $_");
+	print STDERR ("$host mgd version mismatch: $_") if ($debug);
+	$clean_run = 0;
+	last;
+    }
+    while (/>\s*($cmds_regexp)\s*$/) {
+	$cmd = $1;
+	if (!defined($prompt)) {
+	    $prompt = ($_ =~ /^([^>]+>)/)[0];
+	    $prompt =~ s/([][}{)(\\])/\\$1/g;
+	    print STDERR ("PROMPT MATCH: $prompt\n") if ($debug);
+	}
+	print STDERR ("HIT COMMAND:$_") if ($debug);
+	if (! defined($commands{$cmd})) {
+	    print STDERR "$host: found unexpected command - \"$cmd\"\n";
+	    $clean_run = 0;
+	    last TOP;
+	}
+	$rval = &{$commands{$cmd}};
+	delete($commands{$cmd});
+	if ($rval == -1) {
+	    $clean_run = 0;
+	    last TOP;
+	}
+    }
+    if (/>\s*quit/) {
+	$clean_run=1;
+	last;
+    }
+}
+print STDOUT "Done jlogin: $_\n" if ($log);
+# Flush History
+ProcessHistory("","","","");
+# Cleanup
+close(INPUT);
+close(OUTPUT);
+
+if (defined($ENV{NOPIPE})) {
+    unlink("$host.raw") if (! $debug);
+}
+
+# check for completeness
+$commands = join(", ", keys(%commands));
+if (scalar(%commands) || !$clean_run || !$found_end) {
+    if (scalar(%commands)) {
+	printf(STDOUT "$host: missed cmd(s): %s\n", join(',', keys(%commands)));
+	printf(STDERR "$host: missed cmd(s): %s\n", join(',', keys(%commands))) if ($debug);
+    }
+    if (!$clean_run || !$found_end) {
+	print STDOUT "$host: End of run not found\n";
+	print STDERR "$host: End of run not found\n" if ($debug);
+	system("/usr/bin/tail -1 $host.new");
+    }
+    unlink "$host.new" if (! $debug);
+}
