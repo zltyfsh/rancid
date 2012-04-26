@@ -240,6 +240,20 @@ files and other temporary files.
 .sp
 Default: /tmp
 .\"
+.TP
+.B XRRANCID_NOFILESYSTEMS
+Defines a comma separated list of file systems. The file systems listed will
+be excluded from the configuration. Any file system names beginning with a list item
+will excluded.
+.sp
+Example: XRRANCID_NOFILESYSTEMS="disk,bootflash"
+.sp
+Any file system beginning with either "disk" (such as "disk0" and "disk1a") or
+"bootflash" (such as "bootflashb") will be excluded.
+.sp
+To ease filtering of "all" or "no" file systems
+the shortcuts "yes|on|1" (exclude all) and "no|off|1" (exclude none) can be used.
+.\"
 .PP
 Each of these are simply environment variables.  In order for them to be
 present in the environment of child processes, each must be exported.  See

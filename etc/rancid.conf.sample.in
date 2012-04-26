@@ -44,6 +44,13 @@ RCSSYS=@RCSSYS@; export RCSSYS
 # if NOCOMMSTR is set, snmp community strings will be stripped from the configs
 #NOCOMMSTR=YES; export NOCOMMSTR
 #
+# XRRANCID_NOFILESYSTEMS is a comma separated list of file systems to exclude 
+# from the config. Any file system beginning with one of the list items is
+# excluded, i.e "disk" e.g matches "disk0" and "disk1a". 
+# "yes|on|1" and "no|off|0" can be used for excluding "all" respective "no" 
+# file systems.
+#XRRANCID_NOFILESYSTEMS=OFF; export XRRANCID_NOFILESYSTEMS 
+#
 # How many times failed collections are retried (for each run) before
 # giving up.  Minimum: 1
 #MAX_ROUNDS=4; export MAX_ROUNDS

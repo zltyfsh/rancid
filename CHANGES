@@ -1,3 +1,42 @@
+2.3.6+gitb9b270
+	rancid.in: Added more thorough parsing of ShowInventory
+    	* IOS 12.0S on GSR's do emit some spurious "non printable ASCII" 
+	  chars in the output. Even worse, one of those chars is ^H or 
+	  "backspace" which *deletes* previously chars printed. Not so 
+	  nice...
+
+2.3.6+gitf17435
+	rancid.in: Disable timestamp output in show command
+    	* When timestamps are enabled, every single show command starts
+    	  with a header with the timestamp and CPU usage. This header of course
+	  change at every RANID run and thus trigger false positives of config
+	  changes. The solution is to disable timestamps in the current exec 
+	  session before capturing any output.
+
+2.3.6+gitdb09be
+	README: Added xrrancid to list of modules
+	etc/rancid.conf.sample.in, man/rancid.conf.5.in: Added documentation
+	of the XRRANCID_NOFILESYSTEMS filter. 
+
+2.3.6+gitc55ac7
+	xrrancid.in: Replaced with in-house code
+	* As the stock xrrancid code carries a lot of lecacy IOS-code
+	  in it's baggage (just check out ShowVersion), I've decided to
+	  rewrite it from scratch. Commands which are useless (they do not
+	  exist) are either removed or modified to XR's new commands. As
+	  an example "show platform" gives much better result than "show diag"
+	  on XR.
+
+	* IOS XR do also use the disks actively while running, something that
+	  IOS didn't do (except when storing e.g. DHCP leases locally), the
+	  content on the disk changes as a part of normal operation. This will
+	  trigger false positives. A new filter XRRANCD_NOFILESYSTEMS make it
+	  possible to exclude disks from the "dir" command.
+
+	* The diagnostic commands "admin show processes aborts location all"
+	  and "admin show context location all" have been added by request
+	  from David Mack. Thanks for the suggestion and field trials.
+
 2.3.6
 	rancid.spec: updated for 2.3.6 - from Florian Koch
 

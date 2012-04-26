@@ -1,7 +1,5 @@
 #! @PERLV_PATH@
 ##
-## $Id: xrrancid.in 2264 2010-11-04 23:35:17Z heas $
-##
 ## @PACKAGE@ @VERSION@
 ## Copyright (c) 1997-2010 by Terrapin Communications, Inc.
 ## All rights reserved.
@@ -42,7 +40,7 @@
 #
 #  RANCID - Really Awesome New Cisco confIg Differ
 #
-# usage: rancid [-dV] [-l] [-f filename | hostname]
+# usage: xrrancid [-dV] [-l] [-f filename | hostname]
 #
 use Getopt::Std;
 getopts('dflV');
@@ -67,6 +65,14 @@ my($aclsort) = ("ipsort");		# ACL sorting mode
 my($config_register);			# configuration register value
 my($filter_commstr);			# SNMP community string filtering
 my($filter_pwds);			# password filtering mode
+my @filter_filesystems = ();            # filesystems filtering mode, default is filter none
+
+my $TIMESTAMP = qr{ (Mon|Tue|Wed|Thu|Fri|Sat|Sun) \s*                    # day of week 
+		    (Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \s*    # month
+                    \d+ \s*                                              # day
+                    \d+:\d+:\d+ \s*                                      # clock
+                    \d{4} \s*                                            # year
+                  }xms;
 
 # This routine is used to print out the router configuration
 sub ProcessHistory {
@@ -168,1077 +174,750 @@ sub sortbyipaddr {
     &ipaddrval($a) <=> &ipaddrval($b);
 }
 
+# This routine parses "show install summary"
+sub ShowInstallSummary {
+  print STDERR "    In ShowInstallSummary: $_" if ($debug);
+  
+  while (<INPUT>) {
+    # delete non-ascii chars, except new line
+    tr/ -~\n//cd;
+    last if (/^$prompt/);
+    next if (/\s*$cmd\s*$/);
+
+    # skip blank lines
+    next if (/^\s*$/);
+    
+    ProcessHistory("COMMENTS", "keysort", "A10", "! $_");
+  }
+  ProcessHistory("COMMENTS", "keysort", "A19", "!\n");
+  
+  return(0);
+}
+
+
+# This routine parses "show license"
+sub ShowLicense {
+  print STDERR "    In ShowLicense: $_" if ($debug);
+  
+  while (<INPUT>) {
+    # delete non-ascii chars, except new line
+    tr/ -~\n//cd;
+    last if (/^$prompt/);
+    next if (/\s*$cmd\s*$/);
+
+    # skip blank lines
+    next if (/^\s*$/);
+    
+    ProcessHistory("COMMENTS", "keysort", "A20", "! $_");
+  }
+  ProcessHistory("COMMENTS", "keysort", "A29", "!\n");
+  
+  return(0);
+}
+
+
+# This routine parses "admin show variables boot"
+sub ShowBootVar {
+  print STDERR "    In ShowBootVar: $_" if ($debug);
+  
+  while (<INPUT>) {
+    # delete non-ascii chars, except new line
+    tr/ -~\n//cd;
+    last if (/^$prompt/);
+    next if (/\s*$cmd\s*$/);
+
+    # skip blank lines
+    next if (/^\s*$/);
+    
+    ProcessHistory("COMMENTS", "keysort", "A30", "! $_");
+  }
+  ProcessHistory("COMMENTS", "keysort", "A39", "!\n");
+  
+  return(0);
+}
+
+
+# This routine parses "admin show redundancy"
+sub ShowRedundancy {
+  print STDERR "    In ShowRedundancy: $_" if ($debug);
+  
+  my $skip_next = 0;
+
+  while (<INPUT>) {
+    # delete non-ascii chars, incl new line
+    tr/ -~//cd;
+    last if (/^$prompt/);
+    next if (/\s*$cmd\s*$/);
+
+    # skip next line if skip_next. quite logical uh?
+    if ($skip_next) { $skip_next = 0; next; };
+    
+    # skip lines starting with white space and containing some text
+    /^\s+.*\w/ && do { $skip_next = 1; next; };
+
+    # skip certain lines without leading white space
+    # unfortunately, this will be a VERY uncomplete list as
+    # Cisco haven't documented the output
+    next if (/^Current active redcon state/);
+    next if (/^All not-ready/);
+    /^Details/ && do { $skip_next = 1; next; };
+
+    # lines with a time stamp have a trailing "X weeks, Y days, ... Z seconds ago"
+    # remove that trail, else we get a diff every single time.
+    / ( .* $TIMESTAMP ) /xms && do {
+	# Of some reason (smells like a bug) the datetime do have a 1 second
+	# jitter, which of course gives false positives in a diff. 
+	# If we removes the seconds from the datetime, the effect is reduced, 
+	# but not eliminated. 
+	my $str = $1;
+	$str =~ s/(.*\d+:\d+):\d+(.*)/\1\2/;
+	ProcessHistory("COMMENTS", "keysort", "B10", "! $str\n");
+	next;
+    };
+
+    # print rest of the lines verbatim
+    ProcessHistory("COMMENTS", "keysort", "B10", "! $_\n");
+  }
+  ProcessHistory("COMMENTS", "keysort", "B19", "!\n"); 
+  
+  return(0);
+}
+
+
+# This routine parses "dir /all (bootflash|disk|compactflash|harddisk):"
+sub DirSlotN {
+  print STDERR "    In DirSlotN: $_" if ($debug);
+
+  my($dev) = (/\s([^\s]+):/);
+
+  # does any of the filesystems in $filter_filesystems match $dev?
+  # if so, this filesystem should be hidden
+  my $do_hide = 0;
+  foreach (@filter_filesystems) {
+      $do_hide = 1 if ($dev =~ /$_/);
+  }
+
+  while (<INPUT>) {
+    # delete non-ascii chars, except new line
+    tr/ -~\n//cd;
+    last if (/^$prompt/);
+    next if (/\s*$cmd\s*$/);
+
+    # skip everything but prompt detection when hiding filesystem
+    next if ($do_hide);
+
+    # skip blank lines
+    next if (/^\s*$/);
+    
+    return(1) if /^\s*\^\s*$/;
+    return(1) if /Line has invalid autocommand /;
+    return(1) if /(Invalid input detected|Type help or )/;
+    return(1) if /(No such device|Error Sending Request)/i;
+    return(1) if /\%Error: No such file or directory/;
+    return(1) if /No space information available/;
+    return(-1) if /\%Error calling/;
+    return(-1) if /(: device being squeezed|ATA_Status time out)/i; # busy
+    return(-1) if (/command authorization failed/i);
+    return(1) if /(Open device \S+ failed|Error opening \S+:)/;
+    
+    if (/.*\((\d+) bytes free\)/) {
+      my($tmp) = int($1 / (1024 * 1024));
+      s/$1 bytes free/$tmp MBytes free/;
+    }
+    ProcessHistory("COMMENTS", "keysort", "C10", "! $dev: $_");
+  }
+  
+  ProcessHistory("COMMENTS", "keysort", "C10", "!\n") unless ($do_hide);
+  return(0);
+}
+
+
+# This routine parses "show platform"
+# This will create arrays for hw info.
+sub ShowPlatform {
+  print STDERR "    In ShowPlatform: $_" if ($debug);
+  
+  while (<INPUT>) {
+    # delete non-ascii chars, except new line and tab
+    tr/ -~\n\t//cd;
+    last if (/^$prompt/);
+    next if (/\s*$cmd\s*$/);
+
+    # skip blank lines
+    next if (/^\s*$/);
+    
+    # expand tabs to spaces for prettier look
+    my $str = $_;
+    1 while $str =~ s/\t+/' ' x (length($&) * 8 - length($`) % 8)/e;
+    
+    ProcessHistory("COMMENTS", "keysort", "D4", "! $str");
+  }
+  ProcessHistory("COMMENTS", "keysort", "D4", "!\n");
+  
+  return(0);
+}
+
+
+
 # This routine parses "show version"
 sub ShowVersion {
-    print STDERR "    In ShowVersion: $_" if ($debug);
-    my($slaveslot);
+  print STDERR "    In ShowVersion: $_" if ($debug);
+  
+  while (<INPUT>) {
+    # delete non-ascii chars, except new line
+    tr/ -~\n//cd;
+    last if (/^$prompt/);
+    next if (/\s*$cmd\s*$/);
+    next if (/^\s*$/);
+      
+    /(\S+)\s+(?:\((\S+)\)\s+processor|\(revision[^)]+\)).*\s+with (\S+k) bytes/i && do {
+      my $model = $1;
+      my $cpu   = $2 || "";
+      my $mem   = $3;
+      
+      # the next line ought to be the more specific cpu info, grab it.
+      $_ = <INPUT>;
+      if (/^$cpu processor at/i) {
+	$cpu = $_;
+	chomp($cpu);
+      }
 
-    while (<INPUT>) {
-	tr/\015//d;
-	if (/^$prompt/) { $found_version = 1; last};
-	next if (/^(\s*|\s*$cmd\s*)$/);
-	return(1) if (/Line has invalid autocommand /);
-	return(1) if (/(Invalid (input|command) detected|Type help or )/i);
-	return(0) if ($found_version);		# Only do this routine once
-	return(-1) if (/command authorization failed/i);
+      ProcessHistory("COMMENTS", "keysort", "D1", "! Chassis: $model\n");
+      ProcessHistory("COMMENTS", "keysort", "D12", "! Memory: main $mem\n");
+      if ($cpu) {
+	ProcessHistory("COMMENTS", "keysort", "D11", "! CPU: $cpu\n");
+      }
+      next;
+    };
 
-	if (/^Slave in slot (\d+) is running/) {
-	    $slave = " Slave:";
-	    $slaveslot = ", slot $1";
-	    next;
-	}
-	/^(Cisco )?IOS .* Software,? \(([A-Za-z0-9_-]*)\), .*Version\s+(.*)$/ &&
-	    ProcessHistory("COMMENTS","keysort","F1",
-		"!Image:$slave Software: $2, $3\n") && next;
-	/^([A-Za-z-0-9_]*) Synced to mainline version: (.*)$/ &&
-	    ProcessHistory("COMMENTS","keysort","F2",
-		"!Image:$slave $1 Synced to mainline version: $2\n") && next;
-	/^Compiled (.*)$/ &&
-	    ProcessHistory("COMMENTS","keysort","F3",
-		"!Image:$slave Compiled: $1\n") && next;
-	/^ROM: (IOS \S+ )?(System )?Bootstrap.*(Version.*)$/ &&
-	    ProcessHistory("COMMENTS","keysort","G1",
-		"!ROM Bootstrap: $3\n") && next;
-	if (/^Hardware:\s+(.*), (.* RAM), CPU (.*)$/) {
-	    ProcessHistory("COMMENTS","keysort","A1",
-		"!Chassis type: $1 - a PIX\n");
-	    ProcessHistory("COMMENTS","keysort","A2",
-		"!CPU: $3\n");
-	    ProcessHistory("COMMENTS","keysort","B1", "!Memory: $2\n");
-	}
-	/^Serial Number:\s+(.*)$/ &&
-	    ProcessHistory("COMMENTS","keysort","C1", "!$_") && next;
-	# More PIX stuff
-	/^Encryption hardware device\s+:\s+(.*)/ &&
-	    ProcessHistory("COMMENTS","keysort","A3", "!Encryption: $1\n") &&
-	    next;
-	/^running activation key\s*:\s+(.*)/i &&
-	    ProcessHistory("COMMENTS","keysort","D2", "!Key: $1\n") &&
-	    next;
-	# Flash on the PIX or FWSM (FireWall Switch Module)
-	/^Flash(\s+\S+)+ \@ 0x\S+,\s+(\S+)/ &&
-	    ProcessHistory("COMMENTS","keysort","B2", "!Memory: Flash $2\n") &&
-	    next;
-	# CatOS 3500xl stuff
-	/^System serial number(:\s+.*)$/ &&
-	    ProcessHistory("COMMENTS","keysort","C1", "!Serial Number$1\n") &&
-	    next;
-	/^Model / &&
-	    ProcessHistory("COMMENTS","keysort","C2", "!$_") && next;
-	/^Motherboard / &&
-	    ProcessHistory("COMMENTS","keysort","C3", "!$_") && next;
-	/^Power supply / &&
-	    ProcessHistory("COMMENTS","keysort","C4", "!$_") && next;
+    /^(\d+[kKmM]) bytes of non-volatile/ && do {
+      ProcessHistory("COMMENTS", "keysort", "D13", "! Memory: nvram $1" . "bytes\n"); 
+      next;
+    };
 
-	/^Activation Key:\s+(.*)$/ &&
-	    ProcessHistory("COMMENTS","keysort","C2", "!$_") && next;
-	/^ROM: \d+ Bootstrap .*(Version.*)$/ &&
-	    ProcessHistory("COMMENTS","keysort","G2",
-		"!ROM Image: Bootstrap $1\n!\n") && next;
-	/^ROM: .*(Version.*)$/ &&
-	    ProcessHistory("COMMENTS","keysort","G3","!ROM Image: $1\n") && next;
-	/^BOOTFLASH: .*(Version.*)$/ &&
-	    ProcessHistory("COMMENTS","keysort","G4","!BOOTFLASH: $1\n") && next;
-	/^BOOTLDR: .*(Version.*)$/ &&
-	    ProcessHistory("COMMENTS","keysort","G4","!BOOTLDR: $1\n") && next;
-	/^System image file is "([^\"]*)", booted via (\S*)/ &&
-# removed the booted source due to
-# CSCdk28131: cycling info in 'sh ver'
-#	ProcessHistory("COMMENTS","keysort","F4","!Image: booted via $2, $1\n") &&
-	    ProcessHistory("COMMENTS","keysort","F4","!Image: booted $1\n") &&
-	    next;
-	/^System image file is "([^\"]*)"$/ &&
-	    ProcessHistory("COMMENTS","keysort","F5","!Image: $1\n") && next;
-	if (/(\S+(?:\sseries)?)\s+(?:\((\S+)\)\s+processor|\(revision[^)]+\)).*\s+with (\S+k) bytes/i) {
-	    $proc = $1;
-	    my($cpu) = $2;
-	    my($mem) = $3;
-	    my($device) = "router";
+    /^(\d+[kKmM]) bytes of (?:compact )*flash/ && do {
+      ProcessHistory("COMMENTS", "keysort", "D13", "! Memory: flash $1" . "bytes\n"); 
+      next;
+    };
 
-	    # the next line ought to be the more specific cpu info, grab it.
-	    # yet, some boards/IOS vers have a processor ID line between these
-	    # two.  grrr.  make sure we dont grab the "software" junk that
-	    # follows these lines by looking for "CPU at " or the 2600s
-	    # "processor: " unique string.  there are undoubtedly many other
-	    # incantations.  for a slave, we dont get this info, its just a
-	    # blank line.
-	    $_ = <INPUT>;
-	    if (/processor board id/i) {
-		my($sn);
+    /^(\d+[kKmM]) bytes of Flash internal/ && do {
+      ProcessHistory("COMMENTS", "keysort", "D13", "! Memory: bootflash $1" . "bytes\n"); 
+      next;
+    };
 
-		if (/processor board id (\S+)/i) {
-		    $sn = $1;
-		    $sn =~ s/,$//;
-		    ProcessHistory("COMMENTS","keysort","D9",
-				   "!Processor ID: $sn\n");
-		}
-		$_ = <INPUT>;
-	    }
-	    $_ = "" if (! /(cpu at |processor: |$cpu processor,)/i);
-	    tr/\015//d;
-	    s/implementation/impl/i;
-	    if ($_ !~ /^\s*$/) {
-		chomp;
-		s/^/, /;
-	    }
+    /^(\d+[kKmM]) bytes of hard disk/ && do {
+      ProcessHistory("COMMENTS", "keysort", "D13", "! Memory: hard disk $1" . "bytes\n"); 
+      next;
+    };
 
-	    if ($proc eq "CSC") {
-		$type = "AGS";
-	    } elsif ($proc eq "CSC4") {
-		$type = "AGS+";
-	    } elsif ($proc =~ /1900/) {
-		$type = "1900";
-		$device = "switch";
-	    } elsif ($proc =~ /^(AS)?25[12][12]/) {
-		$type = "2500";
-	    } elsif ($proc =~ /261[01]/ || $proc =~ /262[01]/ ) {
-		$type = "2600";
-	    } elsif ($proc =~ /WS-C29/) {
-		$type = "2900XL";
-		$device = "switch";
-	    } elsif ($proc =~ /WS-C355/) {
-		$type = "3550";
-		$device = "switch";
-	    } elsif ($proc =~ /WS-C35/) {
-		$type = "3500XL";
-		$device = "switch";
-	    } elsif ($proc =~ /^36[0246][0-9]/) {
-		$type = "3600";
-	    } elsif ($proc =~ /^37/) {
-		$type = "3700";
-	    } elsif ($proc =~ /^38/) {
-		$type = "3800";
-	    } elsif ($proc =~ /WS-C45/) {
-		$type = "4500";
-		$device = "switch";
-	    } elsif ( $proc =~ /^AS5300/) {
-		$type = "AS5300";
-	    } elsif ( $proc =~ /^AS5350/) {
-		$type = "AS5350";
-	    } elsif ( $proc =~ /^AS5400/) {
-		$type = "AS5400";
-	    } elsif ($proc =~ /6000/) {
-		$type = "6000";
-		$device = "switch";
-	    } elsif ($proc eq "WK-C65") {
-		$type = "6500";
-	    } elsif ($proc eq "RP") {
-		$type = "7000";
-	    } elsif ($proc eq "RP1") {
-		$type = "7000";
-	    } elsif ($proc =~ /720[246]/) {
-		$type = "7200";
-	    } elsif ( $proc =~ /^73/) {
-		$type = "7300";
-	    } elsif ($proc eq "RSP7000") {
-		$type = "7500";
-	    } elsif ($proc =~ /RSP\d/) {
-		$type = "7500";
-	    } elsif ($proc =~ /OSR-76/) {
-		$type = "7600";
-	    } elsif ($proc =~ /CISCO76/) {
-		$type = "7600";
-	    } elsif ($proc =~ /1200[48]\/(GRP|PRP)/ || $proc =~ /1201[26]\/(GRP|PRP)/) {
-		$type = "12000";
-	    } elsif ($proc =~ /1201[26]-8R\/(GRP|PRP)/) {
-		$type = "12000";
-	    } elsif ($proc =~ /1240[48]\/(GRP|PRP)/ || $proc =~ /1241[06]\/(GRP|PRP)/) {
-		$type = "12400";
-	    } else {
-		$type = $proc;
-	    }
-
-	    print STDERR "TYPE = $type\n" if ($debug);
-	    ProcessHistory("COMMENTS","keysort","A1",
-		"!Chassis type:$slave $proc - a $type $device\n");
-	    ProcessHistory("COMMENTS","keysort","B1",
-		"!Memory:$slave main $mem\n");
-	    if (defined($cpu)) {
-		ProcessHistory("COMMENTS","keysort","A3",
-			       "!CPU:$slave $cpu$_$slaveslot\n");
-	    }
-	    next;
-	}
-	if (/(\S+) Silicon\s*Switch Processor/) {
-	    if (!defined($C0)) {
-		$C0 = 1; ProcessHistory("COMMENTS","keysort","C0","!\n");
-	    }
-	    ProcessHistory("COMMENTS","keysort","C2","!SSP: $1\n");
-	    $ssp = 1;
-	    $sspmem = $1;
-	    next;
-	}
-	/^(\d+[kK]) bytes of multibus/ &&
-	    ProcessHistory("COMMENTS","keysort","B2",
-		"!Memory: multibus $1\n") && next;
-	/^(\d+[kK]) bytes of (non-volatile|NVRAM)/ &&
-	    ProcessHistory("COMMENTS","keysort","B3",
-		"!Memory: nvram $1\n") && next;
-	/^(\d+[kK]) bytes of flash memory/ &&
-	    ProcessHistory("COMMENTS","keysort","B5","!Memory: flash $1\n") &&
-	    next;
-	/^(\d+[kK]) bytes of .*flash partition/ &&
-	    ProcessHistory("COMMENTS","keysort","B6",
-		"!Memory: flash partition $1\n") && next;
-	/^(\d+[kK]) bytes of Flash internal/ &&
-	    ProcessHistory("COMMENTS","keysort","B4",
-		"!Memory: bootflash $1\n") && next;
-	if (/^(\d+[kK]) bytes of (Flash|ATA)?.*PCMCIA .*(slot|disk) ?(\d)/i) {
-	    ProcessHistory("COMMENTS","keysort","B7",
-		"!Memory: pcmcia $2 $3$4 $1\n");
-	    next;
-	}
-	if (/^(\d+[kK]) bytes of (slot|disk)(\d)/i) {
-	    ProcessHistory("COMMENTS","keysort","B7",
-		"!Memory: pcmcia $2$3 $1\n");
-	    next;
-	}
-	if (/^WARNING/) {
-	    if (!defined($I0)) {
-		$I0 = 1;
-		ProcessHistory("COMMENTS","keysort","I0","!\n");
-	    }
-	    ProcessHistory("COMMENTS","keysort","I1","! $_");
-	}
-	if (/^Configuration register is (.*)$/) {
-	    $config_register = $1;
-	    next;
-	}
-	if (/^Configuration register on node \S+ is (.*)$/) {
-	    $config_register = $1 if (length($config_register) < 1);
-	    next;
-	}
-    }
-    return(0);
+    /^(\d+[kKmM]) bytes of ATA PCMCIA card at disk (\d+)/i && do {
+      ProcessHistory("COMMENTS", "keysort", "D13", "! Memory: pcmcia disk$2 $1" . "bytes\n");
+      next;
+    };
+  }
+  ProcessHistory("COMMENTS", "keysort", "D19", "!\n");
+  
+  return(0);
 }
 
-# This routine parses "admin show diag".
-# This will create arrays for hw info.
-sub AdminShowDiag {
-    print STDERR "    In ShowDiag: $_" if ($debug);
-
-    while (<INPUT>) {
-	tr/\015//d;
-	if (/^$prompt/) { $found_diag = 1; last};
-	next if (/^(\s*|\s*$cmd\s*)$/);
-	return(1) if (/Line has invalid autocommand /);
-	return(1) if (/(Invalid (input|command) detected|Type help or )/i);
-	return(-1) if (/command authorization failed/i);
-	/^$/ && next;
-
-	s/^NODE //;
-	# wtf are those?
-	next if (/(New Deviation|UDI_VID|Board State)/);
-	# skip insertion time
-	next if (/insertion time/i);
-	# skip board h/w revision junk
-	next if (/^(\s{2}board |\s{3,})/i);
-
-	ProcessHistory("SLOT","","","!$_");
-    }
-    ProcessHistory("SLOT","","","!\n");
-    return(0);
-}
-
-# This routine parses "show redundancy"
-sub ShowRedundancy {
-    print STDERR "    In ShowRedundancy: $_" if ($debug);
-
-    while (<INPUT>) {
-	tr/\015//d;
-	last if (/^$prompt/);
-	next if (/^(\s*|\s*$cmd\s*)$/);
-	return(1) if (/Line has invalid autocommand /);
-	return(1) if (/(Invalid (input|command) detected|Type help or )/i);
-
-	if (/^Version information for secondary in slot (\d+):/) {
-	    $slave = " Slave:";
-	    $slaveslot = ", slot $1";
-	    next;
-	}
-
-	/^IOS .* Software \(([A-Za-z0-9_-]*)\), .*Version\s+(.*)$/ &&
-	    ProcessHistory("COMMENTS","keysort","F1",
-		"!Image:$slave Software: $1, $2\n") && next;
-	/^Compiled (.*)$/ &&
-	    ProcessHistory("COMMENTS","keysort","F3",
-		"!Image:$slave Compiled: $1\n") && next;
-    }
-    return(0);
-}
-
-# This routine parses "show install active"
-sub ShowInstallActive {
-    print STDERR "    In ShowInstallActive: $_" if ($debug);
-
-    while (<INPUT>) {
-	tr/\015//d;
-	last if (/^$prompt/);
-	next if (/^(\s*|\s*$cmd\s*)$/);
-	return(1) if (/^\s*\^\s*$/);
-	return(1) if (/Line has invalid autocommand /);
-	return(1) if (/(Invalid (input|command) detected|Type help or )/i);
-	return(-1) if (/command authorization failed/i);
-
-	ProcessHistory("COMMENTS","keysort","F5","!Image: $_") && next;
-    }
-    return(0);
-}
-
-# This routine parses "show env all"
-sub ShowEnv {
-    # Skip if this is not a 7500, 7200, or 7000.
-    print STDERR "    In ShowEnv: $_" if ($debug);
-
-    while (<INPUT>) {
-	tr/\015//d;
-	if (/^$prompt/) { $found_env = 1; last};
-	next if (/^(\s*|\s*$cmd\s*)$/);
-	#return(1) if ($type !~ /^7/);
-	return(1) if (/Line has invalid autocommand /);
-	return(1) if (/(Invalid (input|command) detected|Type help or )/i);
-	return(0) if ($found_env);		# Only do this routine once
-	return(-1) if (/command authorization failed/i);
-
-	if (!defined($E0)) {
-	    $E0 = 1;
-	    ProcessHistory("COMMENTS","keysort","E0","!\n");
-	}
-	if (/^Arbiter type (\d), backplane type (\S+)/) {
-	    if (!defined($C0)) {
-		$C0 = 1; ProcessHistory("COMMENTS","keysort","C0","!\n");
-	    }
-	    ProcessHistory("COMMENTS","keysort","C1",
-		"!Enviromental Arbiter Type: $1\n");
-	    ProcessHistory("COMMENTS","keysort","A2",
-		"!Chassis type: $2 backplane\n");
-	    next;
-	}
-	/^Power Supply Information$/ && next;
-	/^\s*Power Module\s+Voltage\s+Current$/ && next;
-	/^\s*(Power [^:\n]+)$/ &&
-	    ProcessHistory("COMMENTS","keysort","E1","!Power: $1\n") && next;
-	/^\s*(Lower Power .*)/i &&
-	    ProcessHistory("COMMENTS","keysort","E2","!Power: $1\n") && next;
-	/^\s*(redundant .*)/i &&
-	    ProcessHistory("COMMENTS","keysort","E2","!Power: $1\n") && next;
-	/^\s*(RPS is .*)/i &&
-	    ProcessHistory("COMMENTS","keysort","E2","!Power: $1\n") && next;
-    }
-    ProcessHistory("COMMENTS","","","!\n");
-    return(0);
-}
-
-# This routine parses "show boot"
-sub ShowBoot {
-    # Pick up boot variables if 7000/7200/7500/12000/2900/3500;
-    # otherwise pick up bootflash.
-    print STDERR "    In ShowBoot: $_" if ($debug);
-
-    while (<INPUT>) {
-	tr/\015//d;
-	last if (/^$prompt/);
-	next if (/^(\s*|\s*$cmd\s*)$/);
-	return(1) if (/^\s*\^\s*$/);
-	return(1) if (/Line has invalid autocommand /);
-	return(1) if (/(Invalid (input|command) detected|Type help or )/i);
-	return(1) if (/Ambiguous command/i);
-	return(1) if (/(Open device \S+ failed|Error opening \S+:)/);
-	return(-1) if (/command authorization failed/i);
-
-	next if /CONFGEN variable/;
-	if (!defined($H0)) {
-	    $H0 = 1; ProcessHistory("COMMENTS","keysort","H0","!\n");
-	}
-	if ($type !~ /^(12[04]|7)/) {
-	    if ($type !~ /^(29|35)00/) {
-		ProcessHistory("COMMENTS","keysort","H2","!BootFlash: $_");
-	    } else {
-		ProcessHistory("COMMENTS","keysort","H1","!Variable: $_");
-	    }
-	} elsif (/(variable|register)/) {
-	    ProcessHistory("COMMENTS","keysort","H1","!Variable: $_");
-	}
-    }
-    ProcessHistory("COMMENTS","","","!\n");
-    return(0);
-}
-
-# This routine parses "show gsr chassis-info" for the gsr
-# This will create arrays for hw info.
-sub ShowGSR {
-    # Skip if this is not a 1200n.
-    print STDERR "    In ShowGSR: $_" if ($debug);
-
-    while (<INPUT>) {
-	tr/\015//d;
-	last if (/^$prompt/);
-	next if (/^(\s*|\s*$cmd\s*)$/);
-	return(1) if (/(Invalid (input|command) detected|Type help or )/i);
-	return(-1) if (/command authorization failed/i);
-	# return(1) if ($type !~ /^12[40]/);
-	# the pager can not be disabled per-session on the PIX
-	if (/^(<-+ More -+>)/) {
-	    my($len) = length($1);
-	    s/^$1\s{$len}//;
-	}
-	/^$/ && next;
-
-	/^\s+Chassis: type (\S+) Fab Ver: (\S+)/ &&
-	    ProcessHistory("COMMENTS","keysort","D1",
-				"!GSR Chassis type: $1 Fab Ver: $2\n") &&
-	    next;
-	/^\s+Chassis S\/N: (.*)$/ &&
-	    ProcessHistory("COMMENTS","keysort","D2",
-				"!GSR Chassis S/N: $1\n") &&
-	    next;
-	/^\s+PCA: (\S+)\s*rev: (\S+)\s*dev: \S+\s*HW ver: (\S+)$/ &&
-	    ProcessHistory("COMMENTS","keysort","D3",
-				"!GSR Backplane PCA: $1, rev $2, ver $3\n") &&
-	    next;
-	/^\s+Backplane S\/N: (\S+)$/ &&
-	    ProcessHistory("COMMENTS","keysort","D4",
-				"!GSR Backplane S/N: $1\n") &&
-	    next;
-    }
-    ProcessHistory("COMMENTS","","","!\n");
-    return(0);
-}
-
-# This routine parses "dir /all ((disk|slot)N|bootflash|nvram):"
-sub DirSlotN {
-    print STDERR "    In DirSlotN: $_" if ($debug);
-
-    my($dev) = (/\s([^\s]+):/);
-
-    while (<INPUT>) {
-	tr/\015//d;
-	last if (/^$prompt/);
-	next if (/^(\s*|\s*$cmd\s*)$/);
-	return(1) if /^\s*\^\s*$/;
-	return(1) if (/Line has invalid autocommand /);
-	return(1) if (/(Invalid (input|command) detected|Type help or )/i);
-	return(1) if (/(No such device|Error Sending Request)/i);
-	return(1) if (/\%Error: No such file or directory/);
-	return(1) if (/No space information available/);
-	# Corrupt flash
-	/\%Error calling getdents / &&
-	    ProcessHistory("FLASH","","","!Flash: $dev: $_") && next;
-	return(-1) if (/\%Error calling/);
-	return(-1) if (/(: device being squeezed|ATA_Status time out)/i); # busy
-	return(-1) if (/\%Error opening \S+:\S+ \(Device or resource busy\)/i);
-	return(-1) if (/command authorization failed/i);
-	return(1) if (/(Open device \S+ failed|Error opening \S+:)/);
-	# filter frequently changing files from IOX bootflash
-	if ($dev =~ /bootflash/) {
-	    next if (/temp_cont\s*$/);
-	    next if (/uptime_cont\s*$/);
-	}
-	# Filter dhcp database
-	if (/dhcp_[^. ]*\.txt/) {
-	    next;
-	}
-	# Filter debugging file dlbg.txt & dlbg.txt-1 only on ASR9k w/ XR
-	if ($proc =~ /ASR9K/ && /dlbg\.txt/) {
-	    next;
-	}
-	if (/.*\((\d+) bytes free\)/) {
- 	    my($tmp) = $1;
-	    if ($tmp >= (1024 * 1024 * 1024)) {
-		$tmp = int($tmp / (1024 * 1024 * 1024));
-		s/$1 bytes free/$tmp GB free/;
-	    } else {
-		$tmp = int($tmp / (1024 * 1024));
-		s/$1 bytes free/$tmp MB free/;
-	    }
-	}
-
-	ProcessHistory("FLASH","","","!Flash: $dev: $_");
-    }
-    ProcessHistory("","","","!\n");
-    return(0);
-}
-
-# This routine parses "show controllers"
-sub ShowContAll {
-    # Skip if this is a 70[01]0, 7500, or 12000.
-    print STDERR "    In ShowContAll: $_" if ($debug);
-
-    while (<INPUT>) {
-	tr/\015//d;
-	last if (/^$prompt/);
-	next if (/^(\s*|\s*$cmd\s*)$/);
-	return(1) if (/(Invalid (input|command) detected|Type help or )/i);
-	# return(1) if ($type =~ /^(12[40]|7[05])/);
-	return(-1) if (/command authorization failed/i);
-
-	if (/^Interface ([^ \n(]*)/) { $INT = "$1, "; next; }
-	/^(BRI unit \d)/ &&
-	    ProcessHistory("INT","","","!Interface: $1\n") && next;
-	/^LANCE unit \d, NIM/ &&
-	    ProcessHistory("INT","","","!Interface: $_") && next;
-	/^(LANCE unit \d)/ &&
-	    ProcessHistory("INT","","","!Interface: $1\n") && next;
-	/(Media Type is \S+),/ &&
-	    ProcessHistory("INT","","","!\t$1\n");
-	    if (/(M\dT[^ :]*:) show controller:$/) {
-		my($ctlr) = $1;
-		$_ = <INPUT>; tr/\015//d; s/ subunit \d,//;
-		ProcessHistory("INT","","","!Interface: $ctlr $_");
-	    }
-	if (/^(\S+) : show controller:$/) {
-	    my($ctlr) = $1;
-	    $_ = <INPUT>; tr/\015//d; s/ subunit \d,//;
-	    ProcessHistory("INT","","","!Interface: $ctlr: $_");
-	}
-	/^(HD unit \d), idb/ &&
-	    ProcessHistory("INT","","","!Interface: $1\n") && next;
-	/^HD unit \d, NIM/ &&
-	    ProcessHistory("INT","","","!Interface: $_") && next;
-	/^buffer size \d+  HD unit \d, (.*)/ &&
-	    ProcessHistory("INT","","","!\t$1\n") && next;
-	/^AM79970 / && ProcessHistory("INT","","","!Interface: $_") && next;
-	/^buffer size \d+  (Universal Serial: .*)/ &&
-	    ProcessHistory("INT","","","!\t$1\n") && next;
-	/^Hardware is (.*)/ &&
-	    ProcessHistory("INT","","","!Interface: $INT$1\n") && next;
-	/^(QUICC Serial unit \d),/ &&
-	    ProcessHistory("INT","","","!$1\n") && next;
-	/^QUICC Ethernet .*/ &&
-	    ProcessHistory("INT","","","!$_") && next;
-	/^DTE .*\.$/ &&
-	    ProcessHistory("INT","","","!\t$_") && next;
-	/^(cable type :.*),/ &&
-	    ProcessHistory("INT","","","!\t$1\n") && next;
-	/^(.* cable.*), received clockrate \d+$/ &&
-	    ProcessHistory("INT","","","!\t$1\n") && next;
-	/^.* cable.*$/ &&
-	    ProcessHistory("INT","","","!\t$_") && next;
-    }
-    return(0);
-}
-
-# This routine parses "show debug"
-sub ShowDebug {
-    print STDERR "    In ShowDebug: $_" if ($debug);
-    my($lines) = 0;
-
-    while (<INPUT>) {
-	tr/\015//d;
-	last if (/^$prompt/);
-	next if (/^(\s*|\s*$cmd\s*)$/);
-	return(1) if (/Line has invalid autocommand /);
-	return(1) if (/(Invalid (input|command) detected|Type help or )/i);
-	return(-1) if (/command authorization failed/i);
-
-	/^No matching debug flags set$/ && next;
-	/^No debug flags set$/ && next;
-	ProcessHistory("COMMENTS","keysort","J1","!DEBUG: $_");
-	$lines++;
-    }
-    if ($lines) {
-	ProcessHistory("COMMENTS","keysort","J0","!\n");
-    }
-    return(0);
-}
 
 # This routine parses "show inventory".
 sub ShowInventory {
-    print STDERR "    In ShowInventory: $_" if ($debug);
+  print STDERR "    In ShowInventory: $_" if ($debug);
 
-    while (<INPUT>) {
-	tr/\015//d;
-	return if (/^\s*\^$/);
-	last if (/^$prompt/);
-	next if (/^(\s*|\s*$cmd\s*)$/);
-	return(1) if (/Line has invalid autocommand /);
-	return(1) if (/(Invalid (input|command) detected|Type help or )/i);
-	return(-1) if (/command authorization failed/i);
+  my $key = "D22";
 
-	if (/^(NAME: "[^"]*",) (DESCR: "[^"]+")/) {
-	    ProcessHistory("INVENTORY","","", sprintf("!%-30s %s\n", $1, $2));
-	    next;
-	}
-	# split PID/VID/SN line
-	if (/^PID: (\S*)\s*, VID: (\S*)\s*, SN: (\S*)\s*$/) {
-	    my($entries) = "";
-	    $entries .= "!PID: $1\n" if ($1);
-	    $entries .= "!VID: $2\n" if ($2);
-	    $entries .= "!SN: $3\n" if ($3);
-	    ProcessHistory("INVENTORY","","", "$entries");
-	    next;
-	}
-	ProcessHistory("INVENTORY","","","!$_");
+  while (<INPUT>) {
+    # delete non-ascii chars, except new line
+    tr/ -~\n//cd;
+    return if (/^\s*\^$/);
+    last if (/^$prompt/);
+    next if /\s*$cmd\s*$/;
+
+    # skip blank lines
+    next if (/^\s*$/);
+
+    if (/^NAME: ([^,]+), DESCR: (.*)/) {
+      my $slot = $1;
+      my $desc = $2;
+      $key = ($slot =~ /Chassi/i ? "D21" : "D22");
+      ProcessHistory("COMMENTS", "keysort", $key, "! SLOT: $slot\n");
+      ProcessHistory("COMMENTS", "keysort", $key, "! DESC: $desc\n");
+      next;
     }
-    ProcessHistory("INVENTORY","","","!\n");
 
-    return(0);
+    # split PID/VID/SN line
+    if (/^PID: (\S*)\s*, VID: (\S*)\s*, SN: (\S*)\s*$/) {
+      my $entries = "";
+      $entries .= "! PID : $1\n" if ($1);
+      $entries .= "! VID : $2\n" if ($2 && $2 !~ m!N/A!i);
+      $entries .= "! SN  : $3\n" if ($3);
+      ProcessHistory("COMMENTS", "keysort", $key, "$entries!\n");
+      next;
+    }
+  }
+  ProcessHistory("COMMENTS", "keysort", "D29", "!\n");
+
+  return(0);
 }
 
-# This routine parses "show vlan"
-sub ShowVLAN {
-    print STDERR "    In ShowVLAN: $_" if ($debug);
 
-    ($_ = <INPUT>, return(1)) if (!$DO_SHOW_VLAN);
+# This routine parses "show dsc all"
+sub ShowDSC {
+  print STDERR "    In ShowDSC: $_" if ($debug);
+  
+  while (<INPUT>) {
+    # delete non-ascii chars, except new line and tabs
+    tr/ -~\n\t//cd;
+    last if (/^$prompt/);
+    next if (/\s*$cmd\s*$/);
 
-    while (<INPUT>) {
-	tr/\015//d;
-	last if (/^$prompt/);
-	next if (/^(\s*|\s*$cmd\s*)$/);
-	return(1) if /^\s*\^\s*$/;
-	return(1) if (/Line has invalid autocommand /);
-	return(1) if (/(Invalid (input|command) detected|Type help or )/i);
-	return(1) if (/Ambiguous command/i);
-	return(-1) if (/command authorization failed/i);
+    # skip blank lines
+    next if (/^\s*$/);
 
-	ProcessHistory("COMMENTS","keysort","IO","!VLAN: $_");
-    }
-    ProcessHistory("COMMENTS","keysort","IO","!\n");
-    return(0);
+    my $str = $_;
+    
+    # expand tabs to spaces for prettier look
+    1 while $str =~ s/\t+/' ' x (length($&) * 8 - length($`) % 8)/e;
+    
+    ProcessHistory("COMMENTS", "keysort", "D31", "! $str");
+  }
+  ProcessHistory("COMMENTS", "keysort", "D39", "!\n");
+  
+  return(0);
 }
+
+
+# This routine parses "admin show processes aborts location all"
+sub ShowProcessAborts {
+  print STDERR "    In ShowProcessAborts: $_" if ($debug);
+
+  my $node = "";
+  my $separator_needed = 0;
+
+  # print header
+  ProcessHistory("COMMENTS", "keysort", "E10", "! Process aborts:\n");
+  ProcessHistory("COMMENTS", "keysort", "E10", "! ===============\n");
+
+  while (<INPUT>) {
+    # delete non-ascii chars, except new line
+    tr/ -~\n//cd;
+    last if (/^$prompt/);
+    next if (/\s*$cmd\s*$/);
+
+    # skip blank lines
+    next if (/^\s*$/);
+
+    # filter dashed lines
+    next if (/^[-]+$/);
+
+    # if no aborts found, keep shut
+    next if (/^no process aborts found/i);
+
+    /^node:\s*(.*)$/ && do {
+	# if this is not the first occurance, set 
+	# separator_nedded flag
+	$separator_needed = ($node ne "");
+	$node = $1;
+	next;
+    };
+
+    if ($separator_needed) {
+	ProcessHistory("COMMENTS", "keysort", "E10", "!\n");
+	$separator_needed = 0;
+    }
+    ProcessHistory("COMMENTS", "keysort", "E10", "! Node: $node\n");
+    ProcessHistory("COMMENTS", "keysort", "E10", "! $_");
+  }
+  ProcessHistory("COMMENTS", "keysort", "E19", "!\n");
+  
+  return(0);
+}
+
+
+# This routine parses "admin show context location all"
+sub ShowContext {
+  print STDERR "    In ShowContext: $_" if ($debug);
+
+  my $node = "";
+  my $separator_needed = 0;
+
+  # print header
+  ProcessHistory("COMMENTS", "keysort", "E20", "! Contexts:\n");
+  ProcessHistory("COMMENTS", "keysort", "E20", "! =========\n");
+
+  while (<INPUT>) {
+    # delete non-ascii chars, except new line
+    tr/ -~\n//cd;
+    last if (/^$prompt/);
+    next if (/\s*$cmd\s*$/);
+
+    # skip blank lines
+    next if (/^\s*$/);
+
+    # filter dashed lines
+    next if (/^[-]+$/);
+
+    /^node:\s*(.*)$/ && do {
+	# if this is not the first occurance, set 
+	# separator_nedded flag
+	$separator_needed = ($node ne "");
+	$node = $1;
+	next;
+    };
+
+    /^Crashed pid/ && do {
+	if ($separator_needed) {
+	    ProcessHistory("COMMENTS", "keysort", "E20", "!\n");
+	    $separator_needed = 0;
+	}
+	ProcessHistory("COMMENTS", "keysort", "E20", "! Node: $node\n");
+	ProcessHistory("COMMENTS", "keysort", "E20", "! $_");
+	next;
+    }; 
+
+    /^(Crash|Process|Signal|Core)/ && do {
+	if ($separator_needed) {
+	    ProcessHistory("COMMENTS", "keysort", "E20", "!\n");
+	    $separator_needed = 0;
+	}
+	ProcessHistory("COMMENTS", "keysort", "E20", "! $_");
+	next;
+    }; 
+  }
+  ProcessHistory("COMMENTS", "keysort", "E29", "!\n");
+  
+  return(0);
+}
+
 
 # This routine processes a "write term"
 sub WriteTerm {
-    print STDERR "    In WriteTerm: $_" if ($debug);
-    my($lineauto,$comment,$linecnt) = (0,0,0);
+  print STDERR "    In WriteTerm: $_" if ($debug);
 
-    while (<INPUT>) {
-	tr/\015//d;
-	last if (/^$prompt/);
-	return(1) if (!$linecnt && /^\s+\^\s*$/);
-	return(1) if (/Line has invalid autocommand /);
-	return(1) if (/(Invalid (input|command) detected|Type help or )/i);
-	return(1) if (/\%Error: No such file or directory/);
-	return(0) if ($found_end);		# Only do this routine once
-	return(-1) if (/command authorization failed/i);
-	return(-1) if (/% ?configuration buffer full/i);
-	/^! no configuration change since last restart/i && next;
-	# skip emtpy lines at the beginning
-	if (!$linecnt && /^\s*$/) {
-	    next;
-	}
-	if (!$linecnt && defined($config_register)) {
-	    ProcessHistory("","","", "!\nconfig-register $config_register\n");
-	}
+  # add two separator lines at top
+  ProcessHistory("", "", "", "!\n!\n");
 
-	/Non-Volatile memory is in use/ && return(-1); # NvRAM is locked
-	/% Configuration buffer full, / && return(-1); # buffer is in use
-	$linecnt++;
-	$lineauto = 0 if (/^[^ ]/);
-	# skip the crap
-	if (/^(##+|(building|current) configuration)/i) {
-	    while (<INPUT>) {
-		next if (/^Current configuration\s*:/i);
-		next if (/^:/);
-		next if (/^([%!].*|\s*)$/);
-		next if (/^ip add.*ipv4:/);	# band-aid for 3620 12.0S
-		last;
-	    }
-	    tr/\015//d;
-	}
-	# some versions have other crap mixed in with the bits in the
-	# block above
-	/^! (Last configuration|NVRAM config last)/ && next;
-	# and for the ASA
-	/^: (Written by \S+ at|Saved)/ && next;
+  while (<INPUT>) {
+    # delete non-ascii chars, except new line
+    tr/ -~\n//cd;
+    last if (/^$prompt/);
+ 
+    /Non-Volatile memory is in use/  && return(-1); # NvRAM is locked
 
-	# skip consecutive comment lines to avoid oscillating extra comment
-	# line on some access servers.  grrr.
-	if (/^!\s*$/) {
-	    next if ($comment);
-	    ProcessHistory("","","",$_);
-	    $comment++;
-	    next;
-	}
-	$comment = 0;
+    # skip some initial crap
+    next if /^\s*Building configuration/;
+    next if /^!+\s+Last configuration/;
 
-	# Dog gone Cool matches to process the rest of the config
-	/^tftp-server flash /   && next; # kill any tftp remains
-	/^ntp clock-period /    && next; # kill ntp clock-period
-	/^ length /		&& next; # kill length on serial lines
-	/^ width /		&& next; # kill width on serial lines
-	$lineauto = 1 if /^ modem auto/;
-	/^ speed / && $lineauto	&& next; # kill speed on serial lines
-	/^ clockrate /		&& next; # kill clockrate on serial interfaces
-	if (/^(enable )?(password|passwd)( level \d+)? / && $filter_pwds >= 1) {
-	    ProcessHistory("ENABLE","","","!$1$2$3 <removed>\n");
-	    next;
-	}
-	if (/^(enable secret) / && $filter_pwds >= 2) {
-	    ProcessHistory("ENABLE","","","!$1 <removed>\n");
-	    next;
-	}
-	if (/^username (\S+)(\s.*)? secret /) {
-	    if ($filter_pwds >= 2) {
-		ProcessHistory("USER","keysort","$1",
-			       "!username $1$2 secret <removed>\n");
-	    } else {
-		ProcessHistory("USER","keysort","$1","$_");
-	    }
-	    next;
-	}
-	if (/^username (\S+)(\s.*)? password ((\d) \S+|\S+)/) {
-	    if ($filter_pwds >= 2) {
-		ProcessHistory("USER","keysort","$1",
-			       "!username $1$2 password <removed>\n");
-	    } elsif ($filter_pwds >= 1 && $4 ne "5"){
-		ProcessHistory("USER","keysort","$1",
-			       "!username $1$2 password <removed>\n");
-	    } else {
-		ProcessHistory("USER","keysort","$1","$_");
-	    }
-	    next;
-	}
-	if (/^( set session-key (in|out)bound ah \d+ )/ && $filter_pwds >= 1) {
-	    ProcessHistory("","","","!$1<removed>\n");
-	    next;
-	}
-	if (/^( set session-key (in|out)bound esp \d+ (authenticator|cypher) )/
-	    && $filter_pwds >= 1) {
-	    ProcessHistory("","","","!$1<removed>\n");
-	    next;
-	}
-	if (/^(\s*)password / && $filter_pwds >= 1) {
-	    ProcessHistory("LINE-PASS","","","!$1password <removed>\n");
-	    next;
-	}
-	if (/^(\s*)secret / && $filter_pwds >= 2) {
-	    ProcessHistory("LINE-PASS","","","!$1secret <removed>\n");
-	    next;
-	}
-	if (/^\s*neighbor (\S*) password / && $filter_pwds >= 1) {
-	    ProcessHistory("","","","! neighbor $1 password <removed>\n");
-	    next;
-	}
-	if (/^(ppp .* password) 7 .*/ && $filter_pwds >= 1) {
-	    ProcessHistory("","","","!$1 <removed>\n"); next;
-	}
-	if (/^(ip ftp password) / && $filter_pwds >= 1) {
-	    ProcessHistory("","","","!$1 <removed>\n"); next;
-	}
-	if (/^( ip ospf authentication-key) / && $filter_pwds >= 1) {
-	    ProcessHistory("","","","!$1 <removed>\n"); next;
-	}
-	# isis passwords appear to be completely plain-text
-	if (/^\s+isis password (\S+)( .*)?/ && $filter_pwds >= 1) {
-	    ProcessHistory("","","","!isis password <removed>$2\n"); next;
-	}
-	if (/^\s+(domain-password|area-password) (\S+)( .*)?/
-							&& $filter_pwds >= 1) {
-	    ProcessHistory("","","","!$1 <removed>$3\n"); next;
-	}
-	# this is reversable, despite 'md5' in the cmd
-	if (/^( ip ospf message-digest-key \d+ md5) / && $filter_pwds >= 1) {
-	    ProcessHistory("","","","!$1 <removed>\n"); next;
-	}
-	# this is also reversable, despite 'md5 encrypted' in the cmd
-	if (/^(  message-digest-key \d+ md5 (7|encrypted)) /
-	    && $filter_pwds >= 1) {
-	    ProcessHistory("","","","!$1 <removed>\n"); next;
-	}
-	if (/^((crypto )?isakmp key) \S+ / && $filter_pwds >= 1) {
-	    ProcessHistory("","","","!$1 <removed> $'"); next;
-	}
-	# filter HSRP passwords
-	if (/^(\s+standby \d+ authentication) / && $filter_pwds >= 1) {
-	    ProcessHistory("","","","!$1 <removed>\n"); next;
-	}
-	# this appears in "measurement/sla" images
-	if (/^(\s+key-string \d?)/ && $filter_pwds >= 1) {
-	    ProcessHistory("","","","!$1 <removed>\n"); next;
-	}
-	if (/^( l2tp tunnel \S+ password)/ && $filter_pwds >= 1) {
-	    ProcessHistory("","","","!$1 <removed>\n"); next;
-	}
-	# i am told these are plain-text on the PIX
-	if (/^(vpdn username (\S+) password)/) {
-	    if ($filter_pwds >= 1) {
-		ProcessHistory("USER","keysort","$2","!$1 <removed>\n");
-	    } else {
-		ProcessHistory("USER","keysort","$2","$_");
-	    }
-	    next;
-	}
-	# ASA/PIX keys in more system:running-config
-	if (/^( pre-shared-key | key |failover key ).*/ && $filter_pwds >= 1) {
-	    ProcessHistory("","","","!$1 <removed> $'"); next;
-	}
-	if (/(\s+ldap-login-password )\S+(.*)/ && $filter_pwds >= 1) {
-	    ProcessHistory("","","","!$1 <removed> $'"); next;
-	}
-	#
-	if (/^( cable shared-secret )/ && $filter_pwds >= 1) {
-	    ProcessHistory("","","","!$1 <removed>\n");
-	    next;
-	}
-	/fair-queue individual-limit/ && next;
-	# sort ip explicit-paths.
-	if (/^ip explicit-path name (\S+)/) {
-	    my($key) = $1;
-	    my($expath) = $_;
-	    while (<INPUT>) {
-		tr/\015//d;
-		last if (/^$prompt/);
-		last if (! /^(ip explicit-path name |[ !])/);
-		if (/^ip explicit-path name (\S+)/) {
-		    ProcessHistory("EXPATH","keysort","$key","$expath");
-		    $key = $1;
-		    $expath = $_;
-		} else  {
-		    $expath .= $_;
-		}
-	    }
-	    ProcessHistory("EXPATH","keysort","$key","$expath");
-	}
-	# sort route-maps
-	if (/^route-map (\S+)/) {
-	    my($key) = $1;
-	    my($routemap) = $_;
-	    while (<INPUT>) {
-		tr/\015//d;
-		last if (/^$prompt/ || ! /^(route-map |[ !])/);
-		if (/^route-map (\S+)/) {
-		    ProcessHistory("ROUTEMAP","keysort","$key","$routemap");
-		    $key = $1;
-		    $routemap = $_;
-		} else  {
-		    $routemap .= $_;
-		}
-	    }
-	    ProcessHistory("ROUTEMAP","keysort","$key","$routemap");
-	}
-	# filter out any RCS/CVS tags to avoid confusing local CVS storage
-	s/\$(Revision|Id):/ $1:/;
-	# order access-lists
-	/^access-list\s+(\d\d?)\s+(\S+)\s+(\S+)/ &&
-	    ProcessHistory("ACL $1 $2","$aclsort","$3","$_") && next;
-	# order extended access-lists
-	/^access-list\s+(\d\d\d)\s+(\S+)\s+ip\s+host\s+(\S+)/ &&
-	    ProcessHistory("EACL $1 $2","$aclsort","$3","$_") && next;
-	/^access-list\s+(\d\d\d)\s+(\S+)\s+ip\s+(\d\S+)/ &&
-	    ProcessHistory("EACL $1 $2","$aclsort","$3","$_") && next;
-	/^access-list\s+(\d\d\d)\s+(\S+)\s+ip\s+any/ &&
-	    ProcessHistory("EACL $1 $2","$aclsort","0.0.0.0","$_") && next;
-	# sort ipv{4,6} access-lists
-	if (/^ipv(4|6) access-list (\S+)\s*$/) {
-	    my($nlri, $key) = ($1,$2);
-	    ProcessHistory("ACL $nlri $key","keysort","$key","$_");
-	    while (<INPUT>) {
-		tr/\015//d;
-		last if (/^$prompt/ || /^\S/);
-		if (/^\s+(\d+) (permit|deny) /) {
-		    ProcessHistory("ACL $nlri $key","keysort","$2"," $2 $'");
-		} else  {
-		    ProcessHistory("ACL $nlri $key","keysort","$key","$_");
-		}
-	    }
-	}
-	# order arp lists
-	/^arp\s+(\d+\.\d+\.\d+\.\d+)\s+/ &&
-	    ProcessHistory("ARP","$aclsort","$1","$_") && next;
-	/^ip prefix-list\s+(\S+)\s+seq\s+(\d+)\s+(permit|deny)\s+(\d\S+)(\/.*)$/ &&
-	    ProcessHistory("PACL $1 $3","$aclsort","$4","ip prefix-list $1 $3 $4$5\n")
-	    && next;
-	# order logging statements
-	/^logging (\d+\.\d+\.\d+\.\d+)/ &&
-	    ProcessHistory("LOGGING","ipsort","$1","$_") && next;
-	# order/prune snmp-server host statements
-	# we only prune lines of the form
-	# snmp-server host a.b.c.d <community>
-	if (/^snmp-server host (\d+\.\d+\.\d+\.\d+) /) {
-	    if ($filter_commstr) {
-		my($ip) = $1;
-		my($line) = "snmp-server host $ip";
-		my(@tokens) = split(' ', $');
-		my($token);
-		while ($token = shift(@tokens)) {
-		    if ($token eq 'version') {
-			$line .= " " . join(' ', ($token, shift(@tokens)));
-			if ($token eq '3') {
-			    $line .= " " . join(' ', ($token, shift(@tokens)));
-			}
-		    } elsif ($token eq 'vrf') {
-			$line .= " " . join(' ', ($token, shift(@tokens)));
-		    } elsif ($token =~ /^(informs?|traps?|(no)?auth)$/) {
-			$line .= " " . $token;
-		    } else {
-			$line = "!$line " . join(' ', ("<removed>",
-						 join(' ',@tokens)));
-			last;
-		    }
-		}
-		ProcessHistory("SNMPSERVERHOST","ipsort","$ip","$line\n");
-	    } else {
-		ProcessHistory("SNMPSERVERHOST","ipsort","$1","$_");
-	    }
-	    next;
-	}
-	if (/^(snmp-server community) (\S+)/) {
-	    if ($filter_commstr) {
-		ProcessHistory("SNMPSERVERCOMM","keysort","$_",
-			       "!$1 <removed>$'") && next;
-	    } else {
-		ProcessHistory("SNMPSERVERCOMM","keysort","$_","$_") && next;
-	    }
-	}
-	# prune tacacs/radius server keys
-	if (/^((tacacs|radius)-server\s(\w*[-\s(\s\S+])*\s?key) (\d )?\w+/
-	    && $filter_pwds >= 1) {
-	    ProcessHistory("","","","!$1 <removed>$'"); next;
-	}
-	# order clns host statements
-	/^clns host \S+ (\S+)/ &&
-	    ProcessHistory("CLNS","keysort","$1","$_") && next;
-	# order alias statements
-	/^alias / && ProcessHistory("ALIAS","keysort","$_","$_") && next;
-	# delete ntp auth password - this md5 is a reversable too
-	if (/^(ntp authentication-key \d+ md5) / && $filter_pwds >= 1) {
-	    ProcessHistory("","","","!$1 <removed>\n"); next;
-	}
-	# order ntp peers/servers
-	if (/^ntp (server|peer) (\d+)\.(\d+)\.(\d+)\.(\d+)/) {
-	    $sortkey = sprintf("$1 %03d%03d%03d%03d",$2,$3,$4,$5);
-	    ProcessHistory("NTP","keysort",$sortkey,"$_");
-	    next;
-	}
-	# order ip host statements
-	/^ip host (\S+) / &&
-	    ProcessHistory("IPHOST","keysort","$1","$_") && next;
-	# order ip nat source static statements
-	/^ip nat (\S+) source static (\S+)/ &&
-	    ProcessHistory("IP NAT $1","ipsort","$2","$_") && next;
-	# order atm map-list statements
-	/^\s+ip\s+(\d+\.\d+\.\d+\.\d+)\s+atm-vc/ &&
-	    ProcessHistory("ATM map-list","ipsort","$1","$_") && next;
-	# order ip rcmd lines
-	/^ip rcmd/ && ProcessHistory("RCMD","keysort","$_","$_") && next;
+    # username/secret command
+    /^(\s*secret)/ && do {
+      if ($filter_pwds >= 2) {
+	ProcessHistory("", "", "", "!$1 <removed>\n");
+	next;
+      }
+    };
 
-	# system controller
-	/^syscon address (\S*) (\S*)/ &&
-	    ProcessHistory("","","","!syscon address $1 <removed>\n") &&
-	    next;
-	if (/^syscon password (\S*)/ && $filter_pwds >= 1) {
-	    ProcessHistory("","","","!syscon password <removed>\n");
-	    next;
-	}
+    # username/password and bgp-ne/password commands
+    /^(\s*password)/ && do {
+      if ($filter_pwds >= 1) {
+	ProcessHistory("", "", "", "!$1 <removed>\n");
+	next;
+      }
+    };
 
-	/^ *Cryptochecksum:/ && next;
+    # system wide tacacs-key
+    /^(\s*tacacs-server key)/ && do {
+      if ($filter_pwds >= 1) {
+	ProcessHistory("", "", "", "!$1 <removed>\n");
+	next;
+      }
+    };
 
-	# catch anything that wasnt matched above.
-	ProcessHistory("","","","$_");
-	# end of config.
-	if (/^end$/) {
-	    $found_end = 1;
-	    return(0);
-	}
-    }
+    # per radius/tacacs-server key
+    /^(\s*key)/ && do {
+      if ($filter_pwds >= 1) {
+	ProcessHistory("", "", "", "!$1 <removed>\n");
+	next;
+      }
+    };
+    
+    
+    # services passwords
+    /^(\s*ftp client (?:anonymous-)*password)/ && do {
+      if ($filter_pwds >= 1) {
+	ProcessHistory("", "", "", "!$1 <removed>\n");
+	next;
+      }
+    };
+    
+    /^(\s*sftp-password)/ && do {
+      if ($filter_pwds >= 1) {
+	ProcessHistory("", "", "", "!$1 <removed>\n");
+	next;
+      }
+    };
+    
+    /(\s*authentication-key)/ && do {
+      if ($filter_pwds >= 1) {
+	ProcessHistory("", "", "", "!$1 <removed>\n");
+	next;
+      }
+    };
+    
+    
+    # protocols authentication
+    /^(\s*hsrp \d+ authentication)/ && do {
+      if ($filter_pwds >= 1) {
+	ProcessHistory("", "", "", "!$1 <removed>\n"); 
+	next;
+      }
+    };
+    
+    /^(\s*vrrp \d+ text-authentication)/ && do {
+      if ($filter_pwds >= 1) {
+	ProcessHistory("", "", "", "!$1 <removed>\n"); 
+	next;
+      }
+    };
+    
+    /^(\s*ppp (chap|ms-chap) password)/ && do {
+      if ($filter_pwds >= 1) {
+	ProcessHistory("", "", "", "!$1 <removed>\n");
+	next;
+      }
+    };
+    
+    /^(\s*ppp pap sent-username \S+ password)/ && do {
+      if ($filter_pwds >= 1) {
+	ProcessHistory("", "", "", "!$1 <removed>\n");
+	next;
+      }
+    };
 
-    return(0);
+    # ldp
+    /^(\s*neighbor \S+ password)/ && do {
+      if ($filter_pwds >= 1) {
+	ProcessHistory("", "", "", "!$1 <removed>\n");
+	next;
+      }
+    };
+
+    
+    # is-is
+    /^(\s*lsp-password\s+(accept|text|hmac-md5))/ && do {
+      if ($filter_pwds >= 1) {
+	ProcessHistory("", "", "", "!$1 <removed>\n");
+	next;
+      }
+    };
+
+    /^(\s*hello-password\s+(accept|text|hmac-md5))/ && do {
+      if ($filter_pwds >= 1) {
+	ProcessHistory("", "", "", "!$1 <removed>\n");
+	next;
+      }
+    };
+
+    # ospfv2
+    /^(\s*authentication-key)/ && do {
+      if ($filter_pwds >= 1) {
+	ProcessHistory("", "", "", "!$1 <removed>\n");
+	next;
+      }
+    };
+
+    # ospfv3
+    /^(\s*authentication ipsec spi)/ && do {
+      if ($filter_pwds >= 1) {
+	ProcessHistory("", "", "", "!$1 <removed>\n");
+	next;
+      }
+    };
+
+    # ipsec
+    /(\s*pre-shared-key)/ && do {
+      if ($filter_pwds >= 1) {
+	ProcessHistory("", "", "", "!$1 <removed>\n");
+	next;
+      }
+    };
+
+    # snmp
+    /^(\s*snmp-server host \S+)/ && do {
+        if ($filter_commstr) {
+            ProcessHistory("", "", "", "!$1 <removed>\n");
+            next;
+        }
+    };
+
+    /^(\s*snmp-server community)/ && do {
+        if ($filter_commstr) {
+            ProcessHistory("", "", "", "!$1 <removed>\n");
+            next;
+        } 
+    };
+
+    /^end$/ && do {
+      $found_end = 1;
+      last;
+    };
+    
+    # catch anything that wasn't matched above.
+    ProcessHistory("", "", "", "$_");
+    
+  }
+  
+  ProcessHistory("", "", "", "$_");
+  return 0;
 }
 
-# This routine processes a "write term"
-sub FilterAll {
-    print STDERR "    In FilterAll: $_" if ($debug);
 
-    while (<INPUT>) {
-	tr/\015//d;
-	last if (/^$prompt/);
-	return(1) if (/Line has invalid autocommand /);
-	return(1) if (/(Invalid (input|command) detected|Type help or )/i);
-	return(1) if (/\%Error: No such file or directory/);
-	return(-1) if (/command authorization failed/i);
-	return(-1) if (/% ?configuration buffer full/i);
-    }
+# This routine processes a "admin show running-config"
+sub AdminShowRunning {
+  print STDERR "    In AdminShowRunning: $_" if ($debug);
+
+  # add a separator line at top
+  ProcessHistory("", "", "", "!\n");
+
+  while (<INPUT>) {
+    # delete non-ascii chars, except new line
+    tr/ -~\n//cd;
+    last if (/^$prompt/);
+ 
+    /Non-Volatile memory is in use/  && return(-1); # NvRAM is locked
+
+    # skip some initial crap
+    next if /^\s*Building configuration/;
+    next if /^!+\s+Last configuration/;
+
+    # username/secret command
+    /^(\s*secret)/ && do {
+      if ($filter_pwds >= 2) {
+	ProcessHistory("", "", "", "!$1 <removed>\n");
+	next;
+      }
+    };
+
+    /^end$/ && do {
+      $found_end = 1;
+      last;
+    };
+    
+    # catch anything that wasn't matched above.
+    ProcessHistory("", "", "", "$_");
+    
+  }
+  
+  ProcessHistory("", "", "", "$_");
+  return 0;
+}
+
+
+# This routine filters all output until return of propmt
+sub FilterAll {
+  print STDERR "    In FilterAll: $_" if ($debug);
+  
+  while (<INPUT>) {
+    # delete non-ascii chars, except new line
+    tr/ -~\n//cd;
+    last if (/^$prompt/);
+    return(1) if (/Line has invalid autocommand /);
+    return(1) if (/(Invalid (input|command) detected|Type help or )/i);
+    return(1) if (/\%Error: No such file or directory/);
+    return(-1) if (/command authorization failed/i);
+    return(-1) if (/% ?configuration buffer full/i);
+  }
 }
 
 # dummy function
 sub DoNothing {print STDOUT;}
 
 # Main
-@commandtable = (
-	# Disable timestamps in output
-	{'terminal no-timestamp'	=> 'FilterAll' },  # XR 3.6 style
-	{'terminal exec prompt no-timestamp' => 'FilterAll' },  # XR 3.8 style
+@commandtable = 
+(
+ # Disable timestamps in output
+ {'terminal no-timestamp'             => 'FilterAll' },  # XR 3.6 style
+ {'terminal exec prompt no-timestamp' => 'FilterAll' },  # XR 3.8 style
 
-	{'admin show version'		=> 'ShowVersion'},
-	{'show redundancy secondary'	=> 'ShowRedundancy'},
-	{'show install active'		=> 'ShowInstallActive'},
-	{'admin show env all'		=> 'ShowEnv'},
-	{'show diag chassis-info'	=> 'ShowGSR'},
-	{'admin show variables boot'	=> 'ShowBoot'},
-	{'dir /all nvram:'		=> 'DirSlotN'},
-	{'dir /all bootflash:'		=> 'DirSlotN'},
-	{'dir /all compactflash:'	=> 'DirSlotN'},
-	{'dir /all compactflasha:'	=> 'DirSlotN'},
-	{'dir /all slot0:'		=> 'DirSlotN'},
-	{'dir /all disk0:'		=> 'DirSlotN'},
-	{'dir /all disk0a:'		=> 'DirSlotN'},
-	{'dir /all slot1:'		=> 'DirSlotN'},
-	{'dir /all disk1:'		=> 'DirSlotN'},
-	{'dir /all disk1a:'		=> 'DirSlotN'},
-	{'dir /all slot2:'		=> 'DirSlotN'},
-	{'dir /all disk2:'		=> 'DirSlotN'},
-	{'dir /all harddisk:'		=> 'DirSlotN'},
-	{'dir /all harddiska:'		=> 'DirSlotN'},
-	{'dir /all harddiskb:'		=> 'DirSlotN'},
-	{'dir /all slavenvram:'		=> 'DirSlotN'},
-	{'dir /all slavebootflash:'	=> 'DirSlotN'},
-	{'dir /all slaveslot0:'		=> 'DirSlotN'},
-	{'dir /all slavedisk0:'		=> 'DirSlotN'},
-	{'dir /all slaveslot1:'		=> 'DirSlotN'},
-	{'dir /all slavedisk1:'		=> 'DirSlotN'},
-	{'dir /all slaveslot2:'		=> 'DirSlotN'},
-	{'dir /all slavedisk2:'		=> 'DirSlotN'},
-	{'dir /all sec-nvram:'		=> 'DirSlotN'},
-	{'dir /all sec-bootflash:'	=> 'DirSlotN'},
-	{'dir /all sec-slot0:'		=> 'DirSlotN'},
-	{'dir /all sec-disk0:'		=> 'DirSlotN'},
-	{'dir /all sec-slot1:'		=> 'DirSlotN'},
-	{'dir /all sec-disk1:'		=> 'DirSlotN'},
-	{'dir /all sec-slot2:'		=> 'DirSlotN'},
-	{'dir /all sec-disk2:'		=> 'DirSlotN'},
-	{'show controllers'		=> 'ShowContAll'},
-	{'admin show diag'		=> 'AdminShowDiag'},
-	{'admin show inventory raw'	=> 'ShowInventory'},
-	{'show vlan'			=> 'ShowVLAN'},
-	{'show debug'			=> 'ShowDebug'},
-	{'show running-config'		=> 'WriteTerm'},
+ # XR IMAGE commands
+ {'admin show install summary'	=> 'ShowInstallSummary'},
+ {'admin show license'	        => 'ShowLicense'},
+ {'admin show variables boot'   => 'ShowBootVar'},
+
+ # REDUNDANCY commands
+ {'admin show redundancy'       => 'ShowRedundancy'},
+
+ # FILESYSTEMS comamnds
+ {'dir /all bootflash:'	        => 'DirSlotN'},
+ {'dir /all disk0:'		=> 'DirSlotN'},
+ {'dir /all disk0a:'		=> 'DirSlotN'},
+ {'dir /all disk1:'		=> 'DirSlotN'},
+ {'dir /all disk1a:'		=> 'DirSlotN'},
+ {'dir /all compactflash:'	=> 'DirSlotN'},
+ {'dir /all compactflasha:'	=> 'DirSlotN'},
+ {'dir /all harddisk:'	        => 'DirSlotN'},
+ {'dir /all harddiska:'	        => 'DirSlotN'},
+ {'dir /all harddiskb:'	        => 'DirSlotN'},
+
+ # HARDWARE commands
+ {'show version'		=> 'ShowVersion'},
+ {'show platform'	        => 'ShowPlatform'},
+ {'admin show inventory'	=> 'ShowInventory'},
+ {'admin show dsc all'	        => 'ShowDSC'},
+
+ # DIAGNOSTIC commands
+ {'admin show processes aborts location all' => 'ShowProcessAborts'},
+ {'admin show context location all'          => 'ShowContext'},
+
+ # RUNNING-CONFIG commands
+ {'admin show running-config'   => 'AdminShowRunning'},
+ {'show running-config'		=> 'WriteTerm'},
 );
+
 # Use an array to preserve the order of the commands and a hash for mapping
 # commands to the subroutine and track commands that have been completed.
 @commands = map(keys(%$_), @commandtable);
 %commands = map(%$_, @commandtable);
 
-$cisco_cmds = join(";",@commands);
-$cmds_regexp = join("|", map quotemeta($_), @commands);
+$cisco_cmds = join(";", @commands);
+$cmds_regexp = join("|", @commands);
 
-if (length($host) == 0) {
-    if ($file) {
-	print(STDERR "Too few arguments: file name required\n");
-	exit(1);
-    } else {
-	print(STDERR "Too few arguments: host name required\n");
-	exit(1);
-    }
-}
-open(OUTPUT,">$host.new") || die "Can't open $host.new for writing: $!\n";
+unless ($host) {
+  unless ($file) {
+    print(STDERR "Too few arguments: file or host name required\n");
+    exit(1);
+  }
+  else {
+    $host = $file;
+  }
+} 
+
+open(OUTPUT, "> $host.new") 
+  or die "Can't open $host.new for writing: $!\n";
 select(OUTPUT);
+
 # make OUTPUT unbuffered if debugging
-if ($debug) { $| = 1; }
+if ($debug) {
+  $| = 1;
+}
 
 if ($file) {
-    print STDERR "opening file $host\n" if ($debug);
-    print STDOUT "opening file $host\n" if ($log);
-    open(INPUT,"<$host") || die "open failed for $host: $!\n";
+  print STDERR "opening file $host\n" if ($debug);
+  print STDOUT "opening file $host\n" if ($log);
+  open(INPUT,"< $host") 
+    or die "open failed for $host: $!\n";
 } else {
-    print STDERR "executing clogin -t $timeo -c\"$cisco_cmds\" $host\n" if ($debug);
-    print STDOUT "executing clogin -t $timeo -c\"$cisco_cmds\" $host\n" if ($log);
-    if (defined($ENV{NOPIPE})) {
-	system "clogin -t $timeo -c \"$cisco_cmds\" $host </dev/null > $host.raw 2>&1" || die "clogin failed for $host: $!\n";
-	open(INPUT, "< $host.raw") || die "clogin failed for $host: $!\n";
-    } else {
-	open(INPUT,"clogin -t $timeo -c \"$cisco_cmds\" $host </dev/null |") || die "clogin failed for $host: $!\n";
-    }
+  print STDERR "executing clogin -autoenable -t $timeo -c\"$cisco_cmds\" $host\n" if ($debug);
+  print STDOUT "executing clogin -autoenable -t $timeo -c\"$cisco_cmds\" $host\n" if ($log);
+  if (defined($ENV{NOPIPE})) {
+    system "clogin -autoenable -t $timeo -c \"$cisco_cmds\" $host </dev/null > $host.raw 2>&1" 
+      or die "clogin failed for $host: $!\n";
+    open(INPUT, "< $host.raw") 
+      or die "clogin failed for $host: $!\n";
+  } else {
+    open(INPUT,"clogin -autoenable -t $timeo -c \"$cisco_cmds\" $host </dev/null |") 
+      or die "clogin failed for $host: $!\n";
+  }
 }
 
 # determine ACL sorting mode
@@ -1261,13 +940,50 @@ if ($ENV{"FILTER_PWDS"} =~ /no/i) {
     $filter_pwds = 1;
 }
 
-ProcessHistory("","","","!RANCID-CONTENT-TYPE: cisco-xr\n!\n");
-ProcessHistory("COMMENTS","keysort","B0","!\n");
-ProcessHistory("COMMENTS","keysort","D0","!\n");
-ProcessHistory("COMMENTS","keysort","F0","!\n");
-ProcessHistory("COMMENTS","keysort","G0","!\n");
+# PoC for filesystem filtering flag
+if (defined($ENV{"XRRANCID_NOFILESYSTEMS"})) {
+    if ($ENV{"XRRANCID_NOFILESYSTEMS"} =~ /^(yes|on|1)$/) {
+	@filter_filesystems = ("bootflash", "disk", "compactflash", "harddisk");
+    }
+    elsif ($ENV{"XRRANCID_NOFILESYSTEMS"} =~ /^(no|off|0)$/) {
+	@filter_filesystems = ();
+    }
+    else {
+	@filter_filesystems = split(/,/, $ENV{"XRRANCID_NOFILESYSTEMS"});
+    }
+} 
+
+
+if ($debug) {
+  print STDERR "Options:\n";
+  print STDERR " file: ", defined $file ? $file : "<undef>", "\n";
+  print STDERR " host: ", defined $host ? $host : "<undef>", "\n";
+  print STDERR " community filter is: ", $filter_commstr ? "on" : "off", "\n";
+  print STDERR " password filter is: ";
+  if ($filter_pwds == 0) {
+    print STDERR "off\n";
+  }
+  elsif ($filter_pwds == 1) {
+    print STDERR "on (limited)\n";
+  }
+  else {
+    print STDERR "on (all)\n";
+  }
+  print STDERR " filesystem filter is: ", 
+  @filter_filesystems ? join(', ', @filter_filesystems) : "off",
+  "\n";
+}
+
+ProcessHistory("","","","! RANCID-CONTENT-TYPE: cisco ios-xr\n!\n");
+ProcessHistory("COMMENTS", "keysort", "A", "! IOS-XR IMAGE INFORMATION\n!\n");
+ProcessHistory("COMMENTS", "keysort", "B", "! REDUNDANCY INFORMATION\n!\n");
+ProcessHistory("COMMENTS", "keysort", "C", "! FILE SYSTEMS INFORMATION\n!\n"); 
+ProcessHistory("COMMENTS", "keysort", "D", "! HARDWARE INFORMATION\n!\n");
+ProcessHistory("COMMENTS", "keysort", "E", "! DIAGNOSTICS\n!\n");
+
 TOP: while(<INPUT>) {
-    tr/\015//d;
+    # delete non-ascii chars, except new line
+    tr/ -~\n//cd;
     if (/[>#]\s?exit$/) {
 	$clean_run = 1;
 	last;
@@ -1278,10 +994,10 @@ TOP: while(<INPUT>) {
 	$clean_run = 0;
 	last;
     }
-    while (/#\s*($cmds_regexp)\s*$/) {
+    while (/[>#]\s*($cmds_regexp)\s*$/) {
 	$cmd = $1;
 	if (!defined($prompt)) {
-	    $prompt = ($_ =~ /^([^#]+#)/)[0];
+	    $prompt = ($_ =~ /^([^#]+)/)[0];
 	    $prompt =~ s/([][}{)(\\])/\\$1/g;
 	    print STDERR ("PROMPT MATCH: $prompt\n") if ($debug);
 	}
@@ -1299,6 +1015,7 @@ TOP: while(<INPUT>) {
 	}
     }
 }
+
 print STDOUT "Done $logincmd: $_\n" if ($log);
 # Flush History
 ProcessHistory("","","","");

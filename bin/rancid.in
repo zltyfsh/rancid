@@ -169,6 +169,22 @@ sub sortbyipaddr {
     &ipaddrval($a) <=> &ipaddrval($b);
 }
 
+# trims a string for specal characters, including:
+# * leading whitespace
+# * trailing whitespace
+# * non-printable ascii chars
+sub trim {
+    my @str = @_;
+    
+    for (@str) {
+        s/^\s+//;  # leading ws
+        s/\s+$//;  # trailing ws
+        s/[[:^print:]]+//g;  # non-printable chars   
+    }
+
+    return wantarray ? @str : $str[0];
+}
+
 # This routine parses "show version"
 sub ShowVersion {
     print STDERR "    In ShowVersion: $_" if ($debug);
@@ -1337,20 +1353,35 @@ sub ShowInventory {
 	    s/^$1\s{$len}//;
 	}
 
-	if (/^(NAME: "[^"]*",) (DESCR: "[^"]+")/) {
-	    ProcessHistory("INVENTORY","","", sprintf("!%-30s %s\n", $1, $2));
+	if (/^NAME: "([^"]*)",\s*DESCR: "([^"]+)"/) {
+	    ProcessHistory("INVENTORY","","", "!\n");
+	    ProcessHistory("INVENTORY","","", "!NAME : $1\n");
+	    ProcessHistory("INVENTORY","","", "!DESCR: $2\n");
 	    next;
 	}
-	# split PID/VID/SN line
-	if (/^PID: (\S*)\s*,\s*VID: (\S*)\s*,\s*SN: (\S*)\s*$/) {
-	    my($entries) = "";
-	    $entries .= "!PID: $1\n" if ($1);
-	    $entries .= "!VID: $2\n" if ($2);
-	    $entries .= "!SN: $3\n" if ($3);
-	    ProcessHistory("INVENTORY","","", "$entries");
-	    next;
-	}
-	ProcessHistory("INVENTORY","","","!$_");
+
+        # process PID, VID and SN separately
+        if (/PID: ([^,]+)/) {
+            my $pid = trim($1);
+            if ($pid) {
+                ProcessHistory("INVENTORY", "", "", "!PID  : $pid\n");
+            }
+        }
+
+        if (/VID: ([^,]+)/) {
+            my $vid = trim($1);
+            if ($vid) {
+                ProcessHistory("INVENTORY", "", "", "!VID  : $vid\n");
+            }
+        }
+
+        if (/SN: (.*)$/) {
+            my $sn = trim($1);
+            if ($sn) {
+                ProcessHistory("INVENTORY", "", "", "!SN   : $sn\n");
+            }
+        }
+
     }
     ProcessHistory("INVENTORY","","","!\n");
 
@@ -1889,12 +1920,28 @@ sub WriteTerm {
     return(0);
 }
 
+# This routine processes a "write term"
+sub FilterAll {
+    print STDERR "    In FilterAll: $_" if ($debug);
+
+    while (<INPUT>) {
+	tr/\015//d;
+	last if (/^$prompt/);
+	return(1) if (/Line has invalid autocommand /);
+	return(1) if (/(Invalid (input|command) detected|Type help or )/i);
+	return(1) if (/\%Error: No such file or directory/);
+	return(-1) if (/command authorization failed/i);
+	return(-1) if (/% ?configuration buffer full/i);
+    }
+}
+
 # dummy function
 sub DoNothing {print STDOUT;}
 
 # Main
 @commandtable = (
-	{'show version'			=> 'ShowVersion'},
+        {'terminal no exec prompt timestamp' => 'FilterAll'},
+        {'show version'			=> 'ShowVersion'},
 	{'show redundancy secondary'	=> 'ShowRedundancy'},
 	{'show idprom backplane',	=> 'ShowIDprom'},
 	{'show install active'		=> 'ShowInstallActive'},
