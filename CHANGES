@@ -1,3 +1,163 @@
+2.3.2
+	srancid: SMC/Dell switch support - loaner from Randy Bush
+
+	*login: Set variables for do_login when both -e and -p/-v are specified
+		- reported by A Dudek
+
+	*login: recognize the environment variable CLOGINRC, see clogin(1)
+
+	agmrancid: Cisco AGM/Anomaly Guard Module
+
+	francid: drop fan speed o/p from show chassis - John Adams
+
+	clogin: match Cisco CSS's "save config?" prompt - Lance Vermilion
+
+	jrancid: include show system core-dumps - Michael Lyngbol
+
+	rancid: filter empty 'show inventory' fields - from Michael Stefaniuc
+
+	*login: If we timeout while trying to quit in run_commands(), close the
+		connection (ie: file descriptor/tty) gracefully. - from Ed
+		Ravin, adjusted to catch the close.
+
+	jrancid: Adapt M160 PCG freq rounding to new format - noted by Mark
+		 Davis
+
+	rancid: collect flash size on the FWSM - from Aaron Gee-clough
+
+	francid: Fix temperature/show chassis filtering for newer Foundry boxes
+		 - noted and tested by Gary Roberts
+
+	rancid: fix Cisco 3825,3845 show version parsing - Michael Stefaniuc
+
+	clogin/hlogin: use send -h for exit command - Michael Stefaniuc
+
+	clogin: Answer F10's "unsaved changes" logout prompt - Colin Corbett
+
+	f10rancid: "Current Conf" begins with ! in recent code - Colin Corbett
+
+	francid: sort intf "secure" MACs, order fluctuates - noted by Brad Volz
+
+	francid: filter temperature o/p on the SuperX - Brad Volz
+
+	convert rancid-fe vendor list to a hash - suggested by Ed Ravin.
+
+	rancid: new format for PIX 7.0 license string - Aaron Gee-clough
+
+	rancid: check for 7300 type of routers
+
+	clogin: older CatOS for 1900s has a CR after the pager prompt
+
+	clogin & xrancid: Extreme XOS prompt format changed - Tore Anderson
+
+	User a .cvsignore file to prevent non-cvs'd control files from appearing
+	in cvs update output.
+
+	rancid: include _ in IOS version strings
+
+	clogin: reduce the number of leading prompt characters used in
+		run_commands to accomodate change seen in cat6500
+		12.1(13)E14 - Charles Aresenault
+
+	hlogin: fix ssh hanging on press any key prompt - Ryan Mooney
+
+	rancid: more support for HFRs
+
+	nlogin: fix missing -re option for password matching - Jee Kay
+
+	lg: fix quoting of juniper command arguments - Richard Doty
+
+	rancid: also match _ in software image names - Stafford A. Rau
+
+	nrancid: fix config comment character & more filtering - Stoned Elipot
+
+	hlogin: look for the 'press any key' prompt after ssh authentication,
+	unlike telnet, where it appears before authentication.
+
+	hpuifilter: allocate a pty to interact with ssh/telnet, so that we
+	interact with ssh for the password exchange.
+	WARNING: repeated ssh login failures to HP Procurves cause the switch's
+	management interface to lock-up (this includes snmp, ping) and sometimes
+	it will crash.  This is with the latest firmware; 5.33 at the time of
+	this writing.
+
+	*rancid: check hostname, or filename, before opening the output file.
+
+	rancid: better filtering of {tacacs,radius}-server - Patrick Adlam
+
+	rancid: better filtering of PIX pager prompt - Aaron Gee-clough
+
+	rancid: collect show debug - Ed Ravin
+
+	add subversion support - mostly from Justin Grote
+
+	clogin: support rsh method - partly from James Stahr
+
+	collect show inventory raw on rancid and cat5rancid
+
+	add -ko to cvs diff commands - Michael Shields
+
+	Add a MAILHEADERS configuration variable for user-defined mail headers 
+
+	rancid: match HSRP group numbers greater than 1 char wide - Ed Ravin
+
+	nrancid: filter radius secrest - Jee Kay
+
+	*rancid: collapse the two command list definitions to an array of
+	hashrefs and build the lists from it - Ed Ravin
+
+	*login: ignore rsh on platforms that do not support it and on those
+	that do (eg: cisco), skip rsh for interactive and script (-s) logins.
+
+	add MAX_ROUNDS rancid.conf knob - Mardechai Abzug
+
+	control_rancid: fix adminmailrcpt default - Danny Thomas
+
+	rancid: correct handling of SNMPv3 host configs - Patrick Adlam
+
+	rancid: filter nv_hdr file seen on sup720 - Bill Ouchark
+
+	etc/Makefile.am: support DESTDIR - from Michael Shields
+
+	rancid: add IOX/CRS support.
+
+	hrancid: show stack does not apply to all procurves - Eugene Zagrebelny
+
+	flogin: older foundry o/s has misc spaces preceeding : in username
+	prompt - from mike ethridge
+
+	A better nlogin & nrancid for NetScreens - help from Stephen Gill
+
+	jerancid: case fluctuates in "active/standby" - from David Gethings
+
+	jerancid: filter "please wait" from config - from David Gethings
+
+	jerancid: filter consecutive periods at top of write term - mark cooper
+
+	jerancid: fix check for slave RE sync in DirSlotN - from Mark Lovely
+
+	rancid: collect 6500's sub-module info from show modules
+
+	jrancid: collect license info & RE Model.  Don't collect
+	the license keys as this is only supported on the jseries
+	and running 'show system license keys' on other junipers
+	produces output from *two* commands - 'show system license'
+	AND 'show system licensekeys'.
+
+	rancid: erroneous space in shared-secret match - from Blaz Zupan
+
+	nrancid: fix missing brace - from David King
+
+	lgform: need strftime from POSIX - from Joao Frade
+
+	rancid: filter multiple-fs file - from Yuval Ben-Ari
+
+	cssrancid: make this parse the collected output properly
+
+	rancid: filter & sort IOS AP username passwords - noted by Stafford Rau
+
+	rancid: parse more variants of 'show diag' output.
+
 2.3.1
 	jerancid: fail/retry if the RP is syncing to the backup - Dave Mack
 

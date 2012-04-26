@@ -1,8 +1,9 @@
 #! @EXPECT_PATH@ --
 ##
-## $Id: nlogin.in,v 1.17 2004/05/21 19:28:49 heas Exp $
+## $Id: nlogin.in,v 1.33 2006/12/08 21:28:26 heas Exp $
 ##
-## Copyright (C) 1997-2004 by Terrapin Communications, Inc.
+## @PACKAGE@ @VERSION@
+## Copyright (C) 1997-2006 by Terrapin Communications, Inc.
 ## All rights reserved.
 ##
 ## This software may be freely copied, modified and redistributed
@@ -20,16 +21,22 @@
 ##
 #
 # The login expect scripts were based on Erik Sherk's gwtn, by permission.
+# Netscreen hacks implemented by Stephen Gill <gillsr@yahoo.com>.
 #
 # nlogin - netscreen login
 #
 # Most options are intuitive for logging into a netscreen firewall.
 #
+# Misc notes
+#	netscreen does not have the concept of "enable", once logged in, a
+#	users permissions can not change.
 
 # Usage line
-set usage "Usage: $argv0 \[-c command\] \[-Evar=x\] \[-f cloginrc-file\]
-\[-s script-file\] \[-t timeout\] \[-u user\] \
-\[-p user-password\] \[-y ssh_cypher_type\] firewall \[firewall...\]\n"
+set usage "Usage: $argv0 \[-c command\] \[-Evar=x\] \[-f cloginrc-file\] \
+\[-p user-password\] \
+\[-s script-file\] \[-t timeout\] \[-u username\] \
+\[-v vty-password\] \[-x command-file\] \
+\[-y ssh_cypher_type\] router \[router...\]\n"
 
 # env(CLOGIN) may contain:
 #	x == do not set xterm banner or name
@@ -39,18 +46,13 @@ set password_file $env(HOME)/.cloginrc
 # Default is to login to the firewall
 set do_command 0
 set do_script 0
-# The default is to automatically enable
-set avenable 0
-# The default is that you login non-enabled (tacacs can have you login already
-# enabled)
-set avautoenable 1
 # The default is to look in the password file to find the passwords.  This
 # tracks if we receive them on the command line.
 set do_passwd 1
 set do_enapasswd 1
 
 # Find the user in the ENV, or use the unix userid.
-if {[ info exists env(CISCO_USER) ] } {
+if {[ info exists env(CISCO_USER) ]} {
     set default_user $env(CISCO_USER)
 } elseif {[ info exists env(USER) ]} {
     set default_user $env(USER)
@@ -63,9 +65,12 @@ if {[ info exists env(CISCO_USER) ] } {
     if [ catch {exec id} reason ] {
 	send_error "\nError: could not exec id: $reason\n"
 	exit 1
-    } 
+    }
     regexp {\(([^)]*)} "$reason" junk default_user
-}   
+}
+if {[ info exists env(CLOGINRC) ]} {
+    set password_file $env(CLOGINRC)
+}
 
 # Sometimes firewall take awhile to answer (the default is 10 sec)
 set timeout 45
@@ -154,7 +159,6 @@ for {set i 0} {$i < $argc} {incr i} {
 	# Does tacacs automatically enable us?
         } -autoenable {
 	    # ignore autoenable
-	    #set avautoenable 1
 	} -* {
 	    send_user "\nError: Unknown argument! $arg\n"
 	    send_user $usage
@@ -208,9 +212,9 @@ proc include {args} {
     regsub -all "(^{|}$)" $args {} args
     if { [ regexp "^/" $args ignore ] == 0 } {
 	set args $env(HOME)/$args
-    } 
+    }
     source_password_file $args
-}   
+}
 
 proc find {var firewall} {
     upvar int_$var list
@@ -228,7 +232,7 @@ proc find {var firewall} {
 # it is sourced, the user better know what to put in there, as it
 # could install more than just password info...  I will assume however,
 # that a "bad guy" could just as easy put such code in the clogin
-# script, so I will leave .cloginrc as just an extention of that script 
+# script, so I will leave .cloginrc as just an extention of that script
 proc source_password_file { password_file } {
     global env
     if { ! [file exists $password_file] } {
@@ -247,6 +251,7 @@ proc source_password_file { password_file } {
 }
 
 # Log into the firewall.
+# returns: 0 on success, 1 on failure
 proc login { firewall user userpswd passwd enapasswd prompt cmethod
 cyphertype } {
     global spawn_id in_proc do_command do_script sshcmd
@@ -256,6 +261,7 @@ cyphertype } {
     # Telnet to the firewall & try to login.
     set progs [llength $cmethod]
     foreach prog [lrange $cmethod 0 end] {
+	incr progs -1
 	if [string match "telnet*" $prog] {
 	    regexp {telnet(:([^[:space:]]+))*} $prog command suffix port
 	    if {"$port" == ""} {
@@ -265,23 +271,23 @@ cyphertype } {
 	    }
 	    if { $retval } {
 		send_user "\nError: telnet failed: $reason\n"
-		exit 1
+		return 1
 	    }
 	} elseif ![string compare $prog "ssh"] {
 	    if [ catch {spawn $sshcmd -c $cyphertype -x -l $user $firewall} reason ] {
 		send_user "\nError: $sshcmd failed: $reason\n"
-		exit 1 
-	    }  
-	} elseif ![string compare $prog "rsh"] {
-	    if [ catch {spawn rsh -l $user $firewall} reason ] {
-		send_user "\nError: rsh failed: $reason\n"
-		exit 1
+		return 1
 	    }
+	} elseif ![string compare $prog "rsh"] {
+	    send_error "\nError: unsupported method: rsh\n"
+	    if { $progs == 0 } {
+		return 1
+	    }
+	    continue;
 	} else {
-	    puts "\nError: unknown connection method: $prog"
+	    send_user "\nError: unknown connection method: $prog\n"
 	    return 1
 	}
-	incr progs -1
 
     sleep 0.3
 
@@ -314,10 +320,10 @@ cyphertype } {
     # then it will just send the passwd.
     # if telnet fails with connection refused, try ssh
     expect {
-	"Connection refused" { 
+	"Connection refused" {
 	    send_user "\nError: Connection Refused\n"; wait; return 1
         } eof { send_user "\nError: Couldn't login\n"; wait; return 1
-	} "Unknown host\r\n" { 
+	} "Unknown host\r\n" {
 	    expect eof
 	    send_user "\nError: Unknown host\n"; wait; return 1
 	} "Host is unreachable" {
@@ -343,17 +349,17 @@ cyphertype } {
 	    send "no\r"
 	    send_user "\nError: host key mismatch for $firewall.  Update the SSH known_hosts file accordingly.\n"
 	    return 1 }
-	denied		{ send_user "\nError: Check your passwd for $firewall\n" 
+	denied		{ send_user "\nError: Check your passwd for $firewall\n"
 	                  catch {close}; wait; return 1
 	                }
 	" ### Login failed" {send_user "\nError: Check your passwd for $firewall\n"; return 1 }
-	-re "(login:)"	{
+	-re "(login:)"			{
 					  sleep 1;
 					  send "$user\r"
 					  set uprompt_seen 1
 					  exp_continue
 					}
-	"@\[^\r\n]+\[Pp]assword:"	{
+	-re "@\[^\r\n]+\[Pp]assword:"	{
 					  # ssh pwd prompt
 					  sleep 1
 					  send "$userpswd\r"
@@ -368,7 +374,7 @@ cyphertype } {
 					  }
 					  exp_continue
 					}
-	"$prompt"       { break; }
+	-- "$prompt"			{ break; }
      }
     }
     set in_proc 0
@@ -381,7 +387,7 @@ proc run_commands { prompt command } {
     set in_proc 1
 
     send "set console page 0\r"
-    expect $prompt {}
+    expect -re $prompt {}
 
     # Is this a multi-command?
     if [ string match "*\;*" "$command" ] {
@@ -391,26 +397,38 @@ proc run_commands { prompt command } {
 	for {set i 0} {$i < $num_commands} { incr i} {
 	    send "[subst [lindex $commands $i]]\r"
 	    expect {
-                -re "$prompt"	{}
+		-re "\[\n\r]+"			{ exp_continue }
+                -re "$prompt"			{}
+		-gl "--- more ---"		{ send " "
+						  exp_continue
+						}
             }
 	}
     } else {
 	send "[subst $command]\r"
 	expect {
-                -re "$prompt"	{}
+		-re "\[\n\r]+"			{ exp_continue }
+                -re "$prompt"			{}
+		-gl "--- more ---"		{ send " "
+						  exp_continue
+						}
 	}
     }
     send "exit\r"
     expect {
-	"\n" { exp_continue }
-	-re "$prompt" {
-		send "exit\r"
-		exp_continue }
-	-re "Configuration modified, save?" {
-		send "n\r"
-		exp_continue }
-	timeout { return 0 }
-	eof { return 0 }
+	-re "$prompt"				{
+						  send "exit\r"
+						  exp_continue
+						}
+	-re "\[\n\r]+"				{ exp_continue }
+	-gl "Configuration modified, save?"	{
+						  send "n\r"
+						  exp_continue
+						}
+	timeout					{ catch {close}; wait
+						  return 0
+						}
+	eof					{ return 0 }
     }
     set in_proc 0
 }
@@ -424,7 +442,7 @@ foreach firewall [lrange $argv $i end] {
     set firewall [string tolower $firewall]
     send_user "$firewall\n"
 
-    set prompt ">"
+    set prompt {-> }
 
     # Figure out passwords
     if { $do_passwd || $do_enapasswd } {
@@ -432,19 +450,22 @@ foreach firewall [lrange $argv $i end] {
       if { [llength $pswd] == 0 } {
         send_user "\nError: no password for $firewall in $password_file.\n"
         continue
-      } 
+      }
      set passwd [join [lindex $pswd 0] ""]
      set enapasswd [join [lindex $pswd 1]  ""]
+    } else {
+	set passwd $userpasswd
+	set enapasswd $enapasswd
     }
 
     # Figure out username
-    if {[info exists username]} {  
+    if {[info exists username]} {
       # command line username
       set ruser $username
     } else {
       set ruser [join [find user $firewall] ""]
       if { "$ruser" == "" } { set ruser $default_user }
-    } 
+    }
 
     # Figure out username's password (if different from the vty password)
     if {[info exists userpasswd]} {
@@ -452,17 +473,9 @@ foreach firewall [lrange $argv $i end] {
       set userpswd $userpasswd
     } else {
       set userpswd [join [find userpassword $firewall] ""]
-      if { "$userpswd" == "" } { set userpswd $passwd } 
-    } 
-    
-    # Figure out enable username
-    if {[info exists enausername]} {  
-      # command line enausername
-      set enauser $enausername
-    } else {
-      set enauser [join [find enauser $firewall] ""]
-      if { "$enauser" == "" } { set enauser $ruser } 
-    } 
+      if { "$userpswd" == "" } { set userpswd $passwd }
+    }
+
 
     # Figure out cypher type
     if {[info exists cypher]} {
@@ -477,28 +490,23 @@ foreach firewall [lrange $argv $i end] {
     set cmethod [find method $firewall]
     if { "$cmethod" == "" } { set cmethod {{telnet} {ssh}} }
 
-    # Figure out the SSH executable name  
-    set sshcmd [find sshcmd $firewall]  
-    if { "$sshcmd" == "" } { set sshcmd {ssh} }  
+    # Figure out the SSH executable name
+    set sshcmd [find sshcmd $firewall]
+    if { "$sshcmd" == "" } { set sshcmd {ssh} }
 
     # Login to the firewall
     if {[login $firewall $ruser $userpswd $passwd $enapasswd $prompt $cmethod $cyphertype]} {
 	continue
     }
-    if { $enable } { 
-	if {[do_enable $enauser $enapasswd]} {
-	    if { $do_command || $do_script } {
-		close; wait
-		continue
-	    }
-	}
-    }
+
     # we are logged in, now figure out the full prompt
     send "\r"
     expect {
 	-re "\[\r\n]+"		{ exp_continue; }
-	-re "^.+$prompt"	{ set junk $expect_out(0,string);
-				  regsub -all "\[\]\(\)\[]" $junk {\\&} prompt;
+	-re "^(.+$prompt)"	{ set junk $expect_out(0,string);
+				  # if it has HA (high avail), the prompt will
+				  # be "something-(.)->"
+				  regsub -all "\[\]\)\(\[]" $junk {\\&} prompt;
 				}
     }
 
@@ -508,11 +516,11 @@ foreach firewall [lrange $argv $i end] {
 	}
     } elseif { $do_script } {
 	send "set console page 0\r"
-	expect $prompt	{}
+	expect -re $prompt	{}
 	source $sfile
 	close
     } else {
-	label $firewall 
+	label $firewall
 	log_user 1
 	interact
     }

@@ -1,8 +1,9 @@
 #! /bin/sh
 ##
-## $Id: rancid-run.in,v 1.30 2004/03/12 23:17:28 heas Exp $
+## $Id: rancid-run.in,v 1.35 2006/10/05 04:27:43 heas Exp $
 ##
-## Copyright (C) 1997-2004 by Terrapin Communications, Inc.
+## @PACKAGE@ @VERSION@
+## Copyright (C) 1997-2006 by Terrapin Communications, Inc.
 ## All rights reserved.
 ##
 ## This software may be freely copied, modified and redistributed
@@ -23,9 +24,8 @@
 # @sysconfdir@/rancid.conf or those specified on the command-line.
 #
 
+# Default ENVFILE, overrideable with -f flag.
 ENVFILE="@sysconfdir@/rancid.conf"
-
-. $ENVFILE
 
 TMPDIR=${TMPDIR:=/tmp}; export TMPDIR
 
@@ -34,25 +34,42 @@ CR_ARGV=""; export CR_ARGV
 
 # print a usage message to stderr
 pr_usage() {
-    echo "usage: $0 [-r device_name] [-m mail rcpt] [group [group ...]]" >&2;
+    echo "usage: $0 [-V] [-f config_file] [-r device_name] [-m mail rcpt] [group [group ...]]" >&2;
 }
 
 # command-line options
+# -V
+# -f <config file name>
+# -m <mailto address>
 # -r <device name>
 if [ $# -ge 1 ] ; then
 
     while [ 1 ] ; do
 	case $1 in
-	-r)
+	-V)
+	    echo "@PACKAGE@ @VERSION@"
+	    exit 0
+	    ;;
+	-f)
 	    shift
-	    # next arg is the device name
-	    CR_ARGV="$CR_ARGV -r $1"; export CR_ARGV
+	    # next arg is the alternate config file name
+	    ENVFILE="$1"
+	    if [ -z $ENVFILE ]; then
+		pr_usage
+		exit 1
+	    fi
 	    shift
 	    ;;
 	-m)
 	    shift
 	    # next arg is the mailto name
 	    CR_ARGV="$CR_ARGV -m $1"; export CR_ARGV
+	    shift
+	    ;;
+	-r)
+	    shift
+	    # next arg is the device name
+	    CR_ARGV="$CR_ARGV -r $1"; export CR_ARGV
 	    shift
 	    ;;
 	--)
@@ -73,6 +90,9 @@ if [ $# -ge 1 ] ; then
 	esac
     done
 fi
+
+. $ENVFILE
+
 
 if [ $# -ge 1 ] ; then
     LIST_OF_GROUPS="$*"; export LIST_OF_GROUPS
@@ -131,5 +151,5 @@ END
 
 	echo
 	echo ending: `date`
-    ) >$LOGDIR/$GROUP.`date +%Y%m%d.%H%M%S` 2>&1 
+    ) >$LOGDIR/$GROUP.`date +%Y%m%d.%H%M%S` 2>&1
 done

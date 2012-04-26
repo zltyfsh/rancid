@@ -1,6 +1,6 @@
 .\"
 .hys 50
-.TH "router.db" "5" "7 Jan 2004"
+.TH "router.db" "5" "8 January 2007"
 .SH NAME
 router.db \- rancid group configuration file
 .SH DESCRIPTION
@@ -47,6 +47,11 @@ Domain Name) works best, as in the example above.
 .B <device_type>
 The type of device from the set:
 .RS 8n
+.TP
+.B agm
+A Cisco Anomoly Guard Module (aka Riverhead).
+We suspect that at some point the UI will become more cisco-like and it
+can be merged with the IOS rancid module.
 .TP
 .B alteon
 An Alteon WebOS switches.
@@ -119,6 +124,10 @@ A Redback router, NAS, etc.
 A Riverstone NAS or Cabletron (starting with version ~9.0.3) router.
 .TP
 .ID 15n
+.B smc
+A SMC switch (some Dell OEMs)
+.TP
+.ID 15n
 .B tnt
 A lucent TNT.
 .TP
@@ -160,12 +169,9 @@ file, then
 .B rancid
 will clean up by removing the device's config file from
 \fI$BASEDIR/<group>/configs\fR.
-The
-.IR cvs (1)
-information for the device will be moved to 
-.IR cvs (1)'s
-Attic directory (using
-.IR "cvs delete").
+The device will be removed from the revision control system.
+It is possible, in most cases, to resurrect or check-out copies of
+deleted device configurations.
 .PP
 .SH FILES
 .ta \w'xBASEDIR/<group>/router.db  'u

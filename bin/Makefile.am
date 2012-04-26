@@ -1,9 +1,9 @@
 ## Process this file with automake to produce Makefile.in
 ## A Makefile.in is supplied, in case you do not have automake.
 
-## $Id: Makefile.am,v 1.28 2004/01/11 07:15:23 hank Exp $
+## $Id: Makefile.am,v 1.36 2007/01/13 22:01:53 heas Exp $
 ##
-## Copyright (C) 1997-2004 by Terrapin Communications, Inc.
+## Copyright (C) 1997-2006 by Terrapin Communications, Inc.
 ## All rights reserved.
 ##
 ## This software may be freely copied, modified and redistributed
@@ -25,12 +25,12 @@ AUTOMAKE_OPTIONS=foreign
 
 bin_PROGRAMS = hpuifilter
 bin_SCRIPTS = cat5rancid control_rancid \
-	alogin arancid clogin blogin brancid cssrancid \
+	agmrancid alogin arancid blogin brancid clogin cssrancid \
 	elogin erancid f10rancid flogin francid fnrancid \
-	jlogin jrancid jerancid \
 	hlogin hrancid htlogin htrancid \
+	jerancid jlogin jrancid \
 	mrancid nlogin nrancid nslogin nsrancid par prancid \
-	rancid rancid-fe rivlogin rivrancid rrancid \
+	rancid rancid-fe rivlogin rivrancid rrancid srancid \
 	tntlogin tntrancid xrancid zrancid
 
 bin_SCRIPTS += lg.cgi lgform.cgi rancid-cvs rancid-run
@@ -73,7 +73,9 @@ auto_edit = sed \
 	-e 's,@PERLV_PATH\@,$(PERLV_PATH),g' \
 	-e 's,@LG_PING_CMD\@,$(LG_PING_CMD),g' \
 	-e 's,@ADMINMAILPLUS\@,$(ADMINMAILPLUS),g' \
-	-e 's,@MAILPLUS\@,$(MAILPLUS),g'
+	-e 's,@MAILPLUS\@,$(MAILPLUS),g' \
+	-e 's,@PACKAGE\@,$(PACKAGE),g' \
+	-e 's,@VERSION\@,$(VERSION),g'
 
 lg.cgi: Makefile $(srcdir)/lg.cgi.in
 	rm -f lg.cgi lg.cgi.tmp; \

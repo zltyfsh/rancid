@@ -1,8 +1,8 @@
 .\"
-.\" $Id: rancid.conf.5.in,v 1.11 2004/03/12 23:13:09 heas Exp $
+.\" $Id: rancid.conf.5.in,v 1.16 2005/09/27 16:39:27 heas Exp $
 .\"
 .hys 50
-.TH "rancid.conf" "5" "12 Mar 2004"
+.TH "rancid.conf" "5" "23 September 2005"
 .SH NAME
 rancid.conf \- rancid environment configuration file
 .SH DESCRIPTION
@@ -10,10 +10,10 @@ rancid.conf \- rancid environment configuration file
 contains environment configuration information for
 .BR rancid-run (1)
 and
-.BR rancid (1)
-including shell PATH, list of rancid groups, etc. and is read by several
-scripts at run-time, including
-.BR rancid-run (1).
+.BR rancid-cvs (1),
+including shell PATH, list of rancid groups, etc.
+It is read by several scripts at run-time and others inherit the
+configration from a parent process which has read it.
 .PP
 The syntax of
 .B rancid.conf
@@ -32,10 +32,12 @@ The following variables are used (listed alphabetically):
 .B BASEDIR
 BASEDIR is the directory where
 .B rancid-run's
-log directory and where the CVS repository and rancid collection group
-directories will be placed.  Its value is configure's localstatedir and
-should be modified if rancid is moved to a new location in the file
-system without re-installing from the distribution.
+log directory, the revision control system's repository, and rancid group
+directories will be placed.
+.sp
+Its value is configure's localstatedir and should be modified if rancid is
+moved to a new location in the file system without re-installing from the
+distribution.
 .sp
 Default: @localstatedir@
 .\"
@@ -44,8 +46,9 @@ Default: @localstatedir@
 .IR cvs (1)
 and
 .IR rancid-cvs (1)
-use this environment variable to locate the CVS repository.  It should
-not be necessary to alter it.
+use this environment variable to locate the CVS repository.
+In some cases, and for Subversion, it is used as an argument to commands.
+It should not be necessary to alter it.
 .sp
 Default: $BASEDIR/CVS
 .\"
@@ -123,6 +126,23 @@ For example @MAILPLUS@usfs@example.com, if
 had been set to "@example.com".
 .\"
 .TP
+.B MAILHEADERS
+Define additional mail headers to be added to rancid mail, such as Precedence
+or X- style headers.
+Individual headers must be separated by a \\n (new line).
+.sp
+Default: Precedence: bulk
+.sp
+Example: Precedence: bulk\\nX-clamation: beef cake
+.\"
+.TP
+.B MAX_ROUNDS
+Defines how many times rancid should retry collection of devices that fail.
+The minimum is 1.
+.sp
+Default: 4.
+.\"
+.TP
 .B NOCOMMSTR
 If set,
 .IR rancid (1)
@@ -135,10 +155,11 @@ this is not set.
 If set,
 .IR rancid (1)
 will use temporary files to save the output from the router and then read
-these to build the file which will be saved in CVS.  Otherwise, an IPC
-pipe will be used.  We have found that the buffering mechanisms used in
-perl and expect are heinous.  Using temporary files may result in a noticeable
-improvement in speed.  By default, this is not set.
+these to build the file which will be saved in CVS (or Subversion).
+Otherwise, an IPC pipe will be used.  We have found that the buffering
+mechanisms used in perl and expect are heinous.
+Using temporary files may result in a noticeable improvement in speed.
+By default, this is not set.
 .\"
 .TP
 .B OLDTIME
@@ -177,6 +198,18 @@ scripts should look for the programs that it needs, such as
 .IR telnet (1).
 Its value is set by configure.  Should it be necessary to modify PATH,
 note that it must include @bindir@.
+.\"
+.TP
+.B RCSSYS
+Sets which revision control system is in use.
+Valid values are
+.B cvs
+for CVS
+or
+.B svn
+for Subversion.
+.sp
+Default: cvs
 .\"
 .TP
 .B TERM

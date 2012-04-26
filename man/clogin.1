@@ -1,12 +1,13 @@
 .\"
 .hys 50
-.TH "clogin" "1" "6 Jan 2004"
+.TH "clogin" "1" "23 November 2006"
 .SH NAME
 clogin \- Cisco/Foundry login script
 .SH SYNOPSIS
 .B clogin
 [\fB\-autoenable\fP]
 [\fB\-noenable\fP]
+[\fB\-V\fR]
 [\c
 .BI \-c\ 
 command]
@@ -54,8 +55,9 @@ catalyst switch, Extreme switch, Juniper ERX/E-series, Procket Networks,
 or Redback router.
 There are complementary scripts for
 Alteon,
-Bay Networks (nortel),
 ADC-kentrox EZ-T3 mux,
+Bay Networks (nortel),
+Cisco AGM,
 Foundry,
 HP Procurve Switches,
 Hitachi Routers,
@@ -89,7 +91,9 @@ options exist to override some of the directives found in the
 configuration file.
 .PP
 The command-line options are as follows:
-.PP
+.TP
+.B \-V
+Prints package name and version strings.
 .TP
 .B \-c
 Command to be run on each router list on the command-line.  Multiple
@@ -211,6 +215,12 @@ will not change the banner on your xterm window if this includes the
 character 'x'.
 .\"
 .TP
+.B CLOGINRC
+Specifies an alternative location for the
+.IR .cloginrc
+file, like the \fB\-f\fP option.
+.\"
+.TP
 .B HOME
 Normally set by
 .BR login (1)
@@ -252,13 +262,19 @@ when the device is ready for the next command.
 All these login scripts for separate devices should be rolled into one.
 This goal is exceedingly difficult.
 .PP
-The HP Procurve switch CLI relies heavily upon curses for cursor/screen
-manipulation and assumes a vt100 terminal type.  They do not provide a way
-to set a different terminal type or adjust this behavior.  The resulting
-escape codes make automating interaction with these devices very difficult
-or impossible.  Thus bin/hpuifilter, which must be found in the user's PATH,
-is used by hlogin to filter these.  While this works for rancid's collection,
-there are side effects for interactive logins via hlogin; most of which are
-formatting annoyances that may be remedied by typing CTRL-R to reprint the
-current line.
+The HP Procurve switch and Cisco AGM CLIs rely heavily upon terminal escape
+codes for cursor/screen manipulation and assumes a vt100 terminal type.
+They do not provide a way to set a different terminal type or adjust this
+behavior.
+The resulting escape codes make automating interaction with these devices
+very difficult or impossible.
+Thus bin/hpuifilter, which must be found in the user's PATH, is used by
+hlogin to filter these escape sequences.
+While this works for rancid's collection, there are side effects for
+interactive logins via hlogin; most of which are formatting annoyances that
+may be remedied by typing CTRL-R to reprint the current line.
 .PP
+WARNING: repeated ssh login failures to HP Procurves cause the switch's
+management interface to lock-up (this includes snmp, ping) and sometimes
+it will crash.  This is with the latest firmware; 5.33 at the time of this
+writing.

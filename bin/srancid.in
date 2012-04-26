@@ -1,24 +1,22 @@
 #! @PERLV_PATH@
 ##
-## $Id: brancid.in,v 1.24 2006/10/05 04:27:42 heas Exp $
-## hacked version of Hank's rancid - this one tries to deal with Bay's.
+## Pretty huge hack to take care of Dell Switch configs
+## d_pfleger@juniper.net
 ##
 ## @PACKAGE@ @VERSION@
-## Copyright (C) 1997-2006 by Terrapin Communications, Inc.
+## Copyright (C) 1997-2006 by Henry Kilmer.
 ## All rights reserved.
 ##
 ## This software may be freely copied, modified and redistributed
-## without fee for non-commerical purposes provided that this license
-## remains intact and unmodified with any RANCID distribution.
+## fee for non-commerical purposes provided that this copyright notice
+## preserved intact on all copies and modified copies.
 ##
 ## There is no warranty or other guarantee of fitness of this software.
-## It is provided solely "as is".  The author(s) disclaim(s) all
+## It is provided solely "as is". The author(s) disclaim(s) all
 ## responsibility and liability with respect to this software's usage
 ## or its effect upon hardware, computer systems, other software, or
 ## anything else.
 ##
-## Except where noted otherwise, rancid was written by and is maintained by
-## Henry Kilmer, John Heasley, Andrew Partan, Pete Whiting, and Austin Schutz.
 ##
 #
 #  RANCID - Really Awesome New Cisco confIg Differ
@@ -35,9 +33,8 @@ $log = $opt_l;
 $debug = $opt_d;
 $file = $opt_f;
 $host = $ARGV[0];
-$clean_run = 0;
 $found_end = 0;
-$timeo = 90;				# blogin timeout in seconds
+$timeo = 90;				# hlogin timeout in seconds
 
 my(@commandtable, %commands, @commands);# command lists
 my(%filter_pwds);			# password filtering mode
@@ -142,50 +139,155 @@ sub sortbyipaddr {
     &ipaddrval($a) <=> &ipaddrval($b);
 }
 
-# This routine parses "show config"
-sub ShowConfig {
-    print STDERR "    In ShowConfig: $_" if ($debug);
+# This routine parses "dir"
+sub Dir {
+    print STDERR "    In Dir: $_" if ($debug);
 
     while (<INPUT>) {
+	s/^\s+\015//g;
 	tr/\015//d;
-	last if (/^$prompt/);
-	next if (/^(\s*|\s*$cmd\s*)$/);
-	next if (/^Reading configuration information/);
-	next if (/^Can\'t find object or class named \"\-all\"\s*$/);
-	next if (/lock-address .*$/);
-	next if (/^\# *uptime +\d+\s*$/);
-	if (/community label /) {
-	    if (defined($ENV{'NOCOMMSTR'})) {
-		$_ =~ s/community label .*$/community label <removed>/;
-	    }
-	}
-	return(1) if /(invalid command name)/;
-	ProcessHistory("","","","$_");
-    }
-    # ProcessHistory("","","","!$_");
-    if (/exit$/) {
-	$found_end = 1;
-	return(1);
+	next if /^\s*$/;
+	last if(/$prompt/);
+	# pager remnants like: ^H^H^H    ^H^H^H content
+	s/[\b]+\s*[\b]*//g;
+
+	ProcessHistory("COMMENTS","keysort","D1","! $_");
     }
     return(0);
 }
 
-# This routine parses single command's that return no required info
-sub RunCommand {
-    print STDERR "    In RunCommand: $_" if ($debug);
+
+sub ShowVer {
+    print STDERR "    In ShowVer: $_" if ($debug);
 
     while (<INPUT>) {
 	tr/\015//d;
-	last if (/^$prompt/);
-	next if (/^(\s*|\s*$cmd\s*)$/);
-	# prompt may have changed
-	if (/\>/) {
-	    $prompt = ($_ =~ /^([^>]+>)/)[0];
-	    $prompt =~ s/([][])/\\$1/g;
-	    last;
-	}
+	next if /^\s*$/;
+	last if(/$prompt/);
+	# pager remnants like: ^H^H^H    ^H^H^H content
+	s/[\b]+\s*[\b]*//g;
+
+	ProcessHistory("COMMENTS","keysort","B1","! $_");
     }
-    return(0)
+    return(0);
+}
+
+sub ShowSys {
+    print STDERR "    In ShowSys: $_" if ($debug);
+
+    while (<INPUT>) {
+	s/^\s+\015//g;
+	tr/\015//d;
+	next if /^\s*$/;
+	last if(/$prompt/);
+	# pager remnants like: ^H^H^H    ^H^H^H content
+	s/[\b]+\s*[\b]*//g;
+
+	# Remove Uptime
+	/ Up time/ && next;
+
+	/system description: (.*)/i &&
+	    ProcessHistory("COMMENTS","keysort","A1", "!Chassis type: $1\n") &&
+	    next;
+
+	ProcessHistory("COMMENTS","keysort","C1","! $_");
+    }
+    return(0);
+}
+
+sub ShowVlan {
+    print STDERR "    In ShowVlan: $_" if ($debug);
+
+    while (<INPUT>) {
+	s/^\s+\015//g;
+	tr/\015//d;
+	next if /^\s*$/;
+	last if(/$prompt/);
+	# pager remnants like: ^H^H^H    ^H^H^H content
+	s/[\b]+\s*[\b]*//g;
+
+	# Remove Uptime
+	/ Up time/ && next;
+	ProcessHistory("COMMENTS","keysort","D1","! $_");
+    }
+    return(0);
+}
+
+# This routine processes a "write term" (aka show running-configuration)
+sub WriteTerm {
+    my($comment) = (0);
+    print STDERR "    In ShowRun: $_" if ($debug);
+
+    while (<INPUT>) {
+	tr/\015//d;
+	next if /^\s*$/;
+	last if(/$prompt/);
+	# pager remnants like: ^H^H^H    ^H^H^H content
+	s/[\b]+\s*[\b]*//g;
+
+	# skip consecutive comment lines
+	if (/^!/) {
+	    next if ($comment);
+	    ProcessHistory("","","",$_);
+	    $comment++;
+	    next;
+	}
+	$comment = 0;
+
+	/^building running-config/ && next;
+	/^------+/ && ProcessHistory("","","","!$_") && next;
+	/^router configuration/i && ProcessHistory("","","","!$_") && next;
+	/^oob host config/i && ProcessHistory("","","","!$_") && next;
+	/^empty configuration/i && ProcessHistory("","","","!$_") && next;
+
+	if (/^password (\S+) encrypted/ && $filter_pwds > 1) {
+	    ProcessHistory("","","","!password <removed> encrypted\n");
+	    next;
+	}
+	if (/^password (\S+)$/ && $filter_pwds >= 1) {
+	    ProcessHistory("","","","!password <removed>\n");
+	    next;
+	}
+
+	if (/^(enable password level \d+) (\S+) encrypted/ && $filter_pwds > 1){
+	    ProcessHistory("","","","!$1 <removed> encrypted\n");
+	    next;
+	}
+	if (/^(enable password level \d+) (\S+)$/ && $filter_pwds >= 1) {
+	    ProcessHistory("","","","!$1 <removed> $'\n");
+	    next;
+	}
+
+	# order/prune snmp-server host statements
+	# we only prune lines of the form
+	# snmp-server host a.b.c.d <community>
+	if (/^(snmp-server host) (\d+\.\d+\.\d+\.\d+) (\S+)/) {
+	    if (defined($ENV{'NOCOMMSTR'})) {
+		ProcessHistory("SNMPSERVERHOST","ipsort",
+			       "$2","!$1 $2 <removed>$'");
+	    } else {
+		ProcessHistory("SNMPSERVERHOST","ipsort","$2","$_");
+	    }
+	    next;
+	}
+	if (/^(snmp-server community) (\S+)/) {
+	    if (defined($ENV{'NOCOMMSTR'})) {
+		ProcessHistory("SNMPSERVERCOMM","keysort",
+			       "$_","!$1 <removed>$'") && next;      
+	    } else {
+		ProcessHistory("SNMPSERVERCOMM","keysort","$2","$_") && next;
+	    }
+	}
+
+	# prune tacacs/radius server keys
+	if (/^(tacacs-server|radius-server) key \w+/ && $filter_pwds >= 1) {
+	    ProcessHistory("","","","!$1 <removed>$'"); next;
+	}
+
+	ProcessHistory("","","","$_");
+    }
+    $found_end = 1;
+    return(1);
 }
 
 # dummy function
@@ -193,10 +295,11 @@ sub DoNothing {print STDOUT;}
 
 # Main
 @commandtable = (
-	{'bcc'			=> 'RunCommand'},
-	{'show config'		=> 'ShowConfig'},
-	{'show config -all'	=> 'ShowConfig'},
-	{'exit'			=> 'RunCommand'}
+	{'show system'			=> 'ShowSys'},
+	{'show version'			=> 'ShowVer'},
+	{'dir'				=> 'Dir'},
+	{'show vlan'			=> 'ShowVlan'},
+	{'show running-config'		=> 'WriteTerm'}
 );
 # Use an array to preserve the order of the commands and a hash for mapping
 # commands to the subroutine and track commands that have been completed.
@@ -223,57 +326,53 @@ if ($debug) { $| = 1; }
 if ($file) {
     print STDERR "opening file $host\n" if ($debug);
     print STDOUT "opening file $host\n" if ($log);
-    open(INPUT,"<$host") || die "open failed for $host: $!\n";
-} else {
-    print STDERR "executing blogin -t $timeo -c\"$cisco_cmds\" $host\n" if ($debug);
-    print STDOUT "executing blogin -t $timeo -c\"$cisco_cmds\" $host\n" if ($log);
+    open(INPUT,"<$host") || die "open failed for $host: $!\n"; } else {
+    print STDERR "executing hlogin -t $timeo -c\"$cisco_cmds\" $host\n" if ($debug);
+    print STDOUT "executing hlogin -t $timeo -c\"$cisco_cmds\" $host\n" if ($log);
     if (defined($ENV{NOPIPE})) {
-	system "blogin -t $timeo -c \"$cisco_cmds\" $host </dev/null > $host.raw 2>&1" || die "blogin failed for $host: $!\n";
-	open(INPUT, "< $host.raw") || die "blogin failed for $host: $!\n";
+	system "hlogin -t $timeo -c \"$cisco_cmds\" $host </dev/null > $host.raw 2>&1" || die "hlogin failed for $host: $!\n";
+	open(INPUT, "< $host.raw") || die "hlogin failed for $host: $!\n";
     } else {
-	open(INPUT,"blogin -t $timeo -c \"$cisco_cmds\" $host </dev/null |") || die "blogin failed for $host: $!\n";
+	open(INPUT,"hlogin -t $timeo -c \"$cisco_cmds\" $host </dev/null |") || die "hlogin failed for $host: $!\n";
     }
 }
 
 # determine password filtering mode
 if ($ENV{"FILTER_PWDS"} =~ /no/i) {
-	$filter_pwds = 0;
+    $filter_pwds = 0;
 } elsif ($ENV{"FILTER_PWDS"} =~ /all/i) {
-	$filter_pwds = 2;
+    $filter_pwds = 2;
 } else {
-	$filter_pwds = 1;
+    $filter_pwds = 1;
 }
 
-ProcessHistory("","","","!RANCID-CONTENT-TYPE: bay\n!\n");
+ProcessHistory("","","","!RANCID-CONTENT-TYPE: dell\n!\n");
+ProcessHistory("COMMENTS","keysort","A0","!\n");
+ProcessHistory("COMMENTS","keysort","B0","!\n");
+ProcessHistory("COMMENTS","keysort","C0","!\n");
+ProcessHistory("COMMENTS","keysort","D0","!\n");
 TOP: while(<INPUT>) {
     tr/\015//d;
-    if ( (/\>\s?logout$/) || $found_end ) {
-	$clean_run=1;
-	last;
-    }
     if (/^Error:/) {
-	print STDOUT ("$host blogin error: $_");
-	print STDERR ("$host blogin error: $_") if ($debug);
-	$clean_run=0;
+	print STDOUT ("$host dlogin error: $_");
+	print STDERR ("$host dlogin error: $_") if ($debug);
 	last;
     }
-    while (/>\s*($cmds_regexp)\s*$/) {
+    while (/#\s*($cmds_regexp)\s*$/) {
 	$cmd = $1;
 	if (!defined($prompt)) {
-	    $prompt = ($_ =~ /^([^>]+>)/)[0];
+	    $prompt = ($_ =~ /^([^#]+#)/)[0];
 	    $prompt =~ s/([][}{)(\\])/\\$1/g;
 	    print STDERR ("PROMPT MATCH: $prompt\n") if ($debug);
 	}
 	print STDERR ("HIT COMMAND:$_") if ($debug);
-	if (! defined($commands{$cmd})) {
+	if (!defined($commands{$cmd})) {
 	    print STDERR "$host: found unexpected command - \"$cmd\"\n";
-	    $clean_run = 0;
 	    last TOP;
 	}
 	$rval = &{$commands{$cmd}};
 	delete($commands{$cmd});
 	if ($rval == -1) {
-	    $clean_run = 0;
 	    last TOP;
 	}
     }
@@ -290,12 +389,13 @@ if (defined($ENV{NOPIPE})) {
 }
 
 # check for completeness
-if (scalar(%commands) || !$clean_run || !$found_end) {
+if (scalar(%commands) || !$found_end) {
     if (scalar(%commands)) {
 	printf(STDOUT "$host: missed cmd(s): %s\n", join(',', keys(%commands)));
 	printf(STDERR "$host: missed cmd(s): %s\n", join(',', keys(%commands))) if ($debug);
     }
-    if (!$clean_run || !$found_end) {
+    if (!$found_end) {
+	print STDOUT "$found_end: found end\n";
 	print STDOUT "$host: End of run not found\n";
 	print STDERR "$host: End of run not found\n" if ($debug);
 	system("/usr/bin/tail -1 $host.new");

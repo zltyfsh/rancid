@@ -1,8 +1,9 @@
 #! @EXPECT_PATH@ --
 ##
-## $Id: hlogin.in,v 1.23 2004/04/09 00:06:44 heas Exp $
+## $Id: hlogin.in,v 1.40 2006/12/08 21:28:26 heas Exp $
 ##
-## Copyright (C) 1997-2004 by Terrapin Communications, Inc.
+## @PACKAGE@ @VERSION@
+## Copyright (C) 1997-2006 by Terrapin Communications, Inc.
 ## All rights reserved.
 ##
 ## This software may be freely copied, modified and redistributed
@@ -57,9 +58,11 @@ set do_passwd 1
 set do_enapasswd 1
 # attempt at platform switching.
 set platform ""
+#
+set send_human {.4 .4 .7 .3 5}
 
 # Find the user in the ENV, or use the unix userid.
-if {[ info exists env(CISCO_USER) ] } {
+if {[ info exists env(CISCO_USER) ]} {
     set default_user $env(CISCO_USER)
 } elseif {[ info exists env(USER) ]} {
     set default_user $env(USER)
@@ -74,6 +77,9 @@ if {[ info exists env(CISCO_USER) ] } {
 	exit 1
     }
     regexp {\(([^)]*)} "$reason" junk default_user
+}
+if {[ info exists env(CLOGINRC) ]} {
+    set password_file $env(CLOGINRC)
 }
 
 # Sometimes routers take awhile to answer (the default is 10 sec)
@@ -100,13 +106,16 @@ for {set i 0} {$i < $argc} {incr i} {
 	    }
 	    set do_passwd 0
 	# VTY Password
-	} -v* -
-	-v* {
+	} -v* {
 	    if {! [  regexp .\[vV\](.+) $arg ignore passwd]} {
 		incr i
 		set passwd [ lindex $argv $i ]
 	    }
 	    set do_passwd 0
+	# Version string
+	} -V* {
+	    send_user "@PACKAGE@ @VERSION@\n"
+	    exit 0
 	# Enable Username
 	} -w* -
 	-W* {
@@ -181,8 +190,8 @@ for {set i 0} {$i < $argc} {incr i} {
 	    }
 	    if [ catch {set cmd_fd [open $cmd_file r]} reason ] {
 		send_user "\nError: $reason\n"
-		exit 1 
-	    }  
+		exit 1
+	    }
 	    set cmd_text [read $cmd_fd]
 	    close $cmd_fd
 	    set command [join [split $cmd_text \n] \;]
@@ -244,25 +253,25 @@ proc label { host } {
 # add password *	hanky-pie
 proc add {var args} { global int_$var ; lappend int_$var $args}
 proc include {args} {
-    global env 
-    regsub -all "(^{|}$)" $args {} args 
+    global env
+    regsub -all "(^{|}$)" $args {} args
     if { [ regexp "^/" $args ignore ] == 0 } {
 	set args $env(HOME)/$args
-    } 
+    }
     source_password_file $args
-}   
-    
+}
+
 proc find {var router} {
-    upvar int_$var list 
+    upvar int_$var list
     if { [info exists list] } {
 	foreach line $list {
 	    if { [string match [lindex $line 0] $router ] } {
 		return [lrange $line 1 end]
-	    }     
-	}       
-    }     
-    return {} 
-}           
+	    }
+	}
+    }
+    return {}
+}
 
 # Loads the password file.  Note that as this file is tcl, and that
 # it is sourced, the user better know what to put in there, as it
@@ -287,6 +296,7 @@ proc source_password_file { password_file } {
 }
 
 # Log into the router.
+# returns: 0 on success, 1 on failure
 proc login { router user userpswd passwd enapasswd cmethod cyphertype } {
     global spawn_id in_proc do_command do_script platform
     global prompt u_prompt p_prompt e_prompt sshcmd
@@ -295,6 +305,7 @@ proc login { router user userpswd passwd enapasswd cmethod cyphertype } {
     # try each of the connection methods in $cmethod until one is successful
     set progs [llength $cmethod]
     foreach prog [lrange $cmethod 0 end] {
+	incr progs -1
 	regexp {(telnet|ssh)(:([^[:space:]]+))*} $prog command suffix junk port
 	if [string match "telnet*" $prog] {
 	    if {"$port" == ""} {
@@ -304,28 +315,28 @@ proc login { router user userpswd passwd enapasswd cmethod cyphertype } {
 	    }
 	    if { $retval } {
 		send_user "\nError: telnet failed: $reason\n"
-		exit 1
+		return 1
 	    }
 	} elseif [string match "ssh*" $prog] {
 	    if {"$port" == ""} {
-		set retval [ catch {spawn hpuifilter -- '$sshcmd -c $cyphertype -x -l $user' $router} reason ]
+		set retval [ catch {spawn hpuifilter -- $sshcmd -c $cyphertype -x -l $user $router} reason ]
 	    } else {
 		set retval [ catch {spawn hpuifilter -- $sshcmd -c $cyphertype -p $port -x -l $user $router} reason ]
 	    }
 	    if { $retval } {
 		send_user "\nError: $sshcmd failed: $reason\n"
-		exit 1
+		return 1
 	    }
 	} elseif ![string compare $prog "rsh"] {
-	    if [ catch {spawn hpuifilter rsh -l $user $router} reason ] {
-		send_user "\nError: rsh failed: $reason\n"
-		exit 1
+	    send_error "\nError: unsupported method: rsh\n"
+	    if { $progs == 0 } {
+		return 1
 	    }
+	    continue;
 	} else {
-	    puts "\nError: unknown connection method: $prog"
+	    send_user "\nError: unknown connection method: $prog\n"
 	    return 1
 	}
-	incr progs -1
 	sleep 0.3
 
 	# This helps cleanup each expect clause.
@@ -367,11 +378,6 @@ proc login { router user userpswd passwd enapasswd cmethod cyphertype } {
 		send_user "\nError: Connection Refused ($prog)\n"; return 1
 	    }
 	}
-	eof { send_user "\nError: Couldn't login\n"; wait; return 1 }
-	-nocase "unknown host\r" {
-	    catch {close};
-	    send_user "\nError: Unknown host\n"; wait; return 1
-	}
 	"Host is unreachable" {
 	    catch {close};
 	    send_user "\nError: Host Unreachable!\n"; wait; return 1
@@ -392,12 +398,21 @@ proc login { router user userpswd passwd enapasswd cmethod cyphertype } {
 	    send "no\r"
 	    send_user "\nError: host key mismatch for $router.  Update the SSH known_hosts file accordingly.\n"
 	    return 1 }
+	eof { send_user "\nError: Couldn't login\n"; wait; return 1 }
+	-nocase "unknown host\r" {
+	    catch {close};
+	    send_user "\nError: Unknown host\n"; wait; return 1
+	}
 	-re "$u_prompt"	{ send "$user\r"
 	    expect {
 		eof			{ send_user "\nError: Couldn't login\n"; wait; return 1 }
 		"Login invalid"		{ send_user "\nError: Invalid login\n"; vatch {close}; wait; return 1 }
 		-re "$p_prompt"		{ send "$userpswd\r" }
 		"$prompt"		{ set in_proc 0; return 0 }
+		"Press any key to continue" {
+					  send " "
+					  exp_continue
+					}
 	    }
 	    exp_continue
 	}
@@ -408,9 +423,18 @@ proc login { router user userpswd passwd enapasswd cmethod cyphertype } {
 		send "$passwd\r"
 	    }
 	    expect {
-		eof		{ send_user "\nError: Couldn't login\n"; wait; return 1 }
+		eof		{ send_user "\nError: Couldn't login\n";
+				  wait;
+				  return 1
+				}
+		"Press any key to continue" {
+				  send " ";
+				  exp_continue
+				}
 		-re "$e_prompt"	{ send "$enapasswd\r" }
-		"$prompt"	{ set in_proc 0; return 0 }
+		"$prompt"	{ set in_proc 0;
+				  return 0
+				}
 	    }
 	    exp_continue
 	}
@@ -454,16 +478,14 @@ proc run_commands { prompt command } {
     global in_proc platform
     set in_proc 1
 
-    # If the prompt is (enable), then we are on a switch and the
-    # command is "set length 0"; otherwise its "term length 0".
-    # skip if its and extreme.
+    # Turn off the pager and escape regex meta characters in the $prompt
     send "no page\r"
     regsub -all "\[)(]" $prompt {\\&} reprompt
-	expect {
-	    -re $reprompt	{}
-	    -re "\[\n\r]+"	{ exp_continue }
-	}
-    # this is the only way i see to get rid for more prompts in o/p..grrrrr
+    expect {
+	-re $reprompt	{}
+	-re "\[\n\r]+"	{ exp_continue }
+    }
+    # this is the only way i see to get rid of more prompts in o/p..grrrrr
     log_user 0
     # Is this a multi-command?
     if [ string match "*\;*" "$command" ] {
@@ -491,6 +513,10 @@ proc run_commands { prompt command } {
 						}
 		-re "^<-+ More -+>\[^\n\r]*"	{ send " "
 						  exp_continue }
+		-re "^-+ MORE -+\[^\n\r]*"	{ send " "
+						  exp_continue }
+		-re "^-+More-+\[^\n\r]*"	{ send " "
+						  exp_continue }
 		-re "\b+"			{ exp_continue }
 	    }
 	}
@@ -516,11 +542,13 @@ proc run_commands { prompt command } {
 						  exp_continue }
 		-re "^-+ MORE -+\[^\n\r]*"	{ send " "
 						  exp_continue }
+		-re "^-+More-+\[^\n\r]*"	{ send " "
+						  exp_continue }
 		-re "\b+"			{ exp_continue }
 	}
     }
     log_user 1
-    send "exit\r"
+    send -h "exit\r"
     expect {
 	"Do you want to save current configuration"	{
 						  send "n\r"
@@ -536,10 +564,12 @@ proc run_commands { prompt command } {
 						}
 	-re "\[\r\n]+"				{ exp_continue }
 	-re "^.+>"				{
-						  send "exit\r"
+						  send -h "exit\r"
 						  exp_continue
 						}
-	timeout					{ return 0 }
+	timeout					{ catch {close}; wait
+						  return 0
+						}
 	eof					{ return 0 }
     }
     set in_proc 0
@@ -593,6 +623,9 @@ foreach router [lrange $argv $i end] {
       }
       set passwd [join [lindex $pswd 0] ""]
       set enapasswd [join [lindex $pswd 1] ""]
+    } else {
+	set passwd $userpasswd
+	set enapasswd $enapasswd
     }
 
     # Figure out username
@@ -655,9 +688,9 @@ foreach router [lrange $argv $i end] {
     set cmethod [find method $router]
     if { "$cmethod" == "" } { set cmethod {{telnet} {ssh}} }
 
-    # Figure out the SSH executable name  
-    set sshcmd [find sshcmd $router]  
-    if { "$sshcmd" == "" } { set sshcmd {ssh} }  
+    # Figure out the SSH executable name
+    set sshcmd [find sshcmd $router]
+    if { "$sshcmd" == "" } { set sshcmd {ssh} }
 
     # Adjust our path to find hpuifilter
     regexp {(.*)/[^/]+} $argv0 junk hpf_path
@@ -672,17 +705,17 @@ foreach router [lrange $argv $i end] {
     if { $enable } {
 	if {[do_enable $enauser $enapasswd]} {
 	    if { $do_command || $do_script } {
-		close; wait
+		catch {close}; catch {wait}
 		continue
 	    }
 	}
     }
     # we are logged in, now figure out the full prompt
-    send "\r"   
-    expect {    
+    send "\r"
+    expect {
 	-re "\[\r\n]+"		{ exp_continue; }
 	-re "^.+$prompt"	{ set prompt $expect_out(0,string); }
-    }       
+    }
 
     if { $do_command } {
 	if {[run_commands $prompt $command]} {

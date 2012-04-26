@@ -41,16 +41,54 @@ AC_C_STRINGIZE
 
 # check includes/headers
 AC_HEADER_STDC
-AC_CHECK_HEADERS(limits.h memory.h siginfo.h string.h strings.h unistd.h)
-
-AC_CHECK_HEADERS(errno.h fcntl.h sys/types.h sys/wait.h)
-dnl AC_CHECK_HEADERS(errno.h stdlib.h sys/types.h sys/wait.h)
-dnl AC_CHECK_HEADERS(malloc.h)
+AC_CHECK_HEADERS(errno.h fcntl.h limits.h pty.h malloc.h memory.h siginfo.h \
+		 string.h strings.h stropts.h sys/types.h sys/wait.h unistd.h \
+		 util.h)
 AC_CHECK_HEADERS(sysexits.h)
 
 # check functions
-AC_CHECK_FUNCS(memcpy memmove memset bcopy bzero strerror strchr strrchr \
-	strstr strtok strrtok index rindex)
+AC_CHECK_FUNCS(memcpy memmove memset strerror strchr \
+		strrchr strstr strtok strrtok index rindex unsetenv)
+AC_CHECK_FUNCS(openpty, openpty=1, openpty=0)
+# openlog() is not in the default libraries.  See if it is in some other lib.
+if test $openpty = 0; then
+  for lib in util; do
+    AC_CHECK_LIB($lib, openpty, [AC_DEFINE(HAVE_OPENPTY)
+		 LIBS="$LIBS -l$lib"; openpty=1; break])
+  done
+fi
+# If we dont have openpty, then look for /dev/ptmx for use by our own
+# openpty().
+if test $openpty = 0; then
+    # This check (partially) comes from expect's configure
+    AC_MSG_CHECKING([for SVR4 style pty allocation])
+    AH_TEMPLATE(HAVE_PTMX, "define this if your o/s has /dev/ptmx")
+    if test -r /dev/ptmx ; then
+	AC_MSG_RESULT(yes)
+	AC_DEFINE(HAVE_PTMX)
+	# Some systems need libpt.a to use /dev/ptmx
+	AC_CHECK_FUNCS(ptsname)
+	if test $ac_cv_func_ptsname+set != set; then
+	    # ptsname is not in the default libraries.
+	    for lib in pt; do
+		AC_CHECK_LIB($lib, ptsname, [LIBS="$LIBS -l$lib"; break])
+	    done
+	fi
+    else
+	AC_MSG_RESULT(no)
+    fi
+    # In OSF/1 case, SVR4 are somewhat different.
+    # Gregory Depp <depp@osf.org> 17Aug93
+    AC_MSG_CHECKING([for OSF/1 style pty allocation])
+    AH_TEMPLATE(HAVE_PTMX_OSF, "define this for OSF/1 ptmx")
+    if test -r /dev/ptmx_bsd ; then
+	AC_DEFINE(HAVE_PTMX_OSF) 
+	AC_MSG_RESULT(yes)
+    else
+	AC_MSG_RESULT(no)
+    fi  
+fi
+
 dnl AC_FUNC_VPRINTF
 
 # type checks
@@ -74,8 +112,7 @@ fi],
 ])
 AM_CONDITIONAL([MK_LCLSTATEDIR], [test "${enable_mk_localstatedir}" = yes])
 
-# Check if user wants us to create LOCALSTATEDIR.  If it's a package-system,
-# they might create it themselves for book-keeping sake; eg: NetBSD
+# Check if user wants us to install sample configurations into the sysconfdir.
 AC_MSG_CHECKING([whether to install sample .conf files in sysconfdir])
 AC_ARG_ENABLE(conf-install,
 	AS_HELP_STRING([--enable-conf-install], [enable install of sample .conf files in sysconfdir (default: yes)]),
@@ -88,6 +125,23 @@ fi],
     enable_conf_install="yes"
 ])
 AM_CONDITIONAL([CONF_INSTALL], [test "${enable_conf_install}" = yes])
+
+# Configure for subversion revision control system instead of CVS.
+AC_MSG_CHECKING([whether subversion])
+AC_ARG_ENABLE(svn,
+	AS_HELP_STRING([--enable-svn], [enable use of subversion instead of cvs]),
+[if test "$enable_svn" = yes; then
+    AC_MSG_RESULT(yes)
+    RCSSYS="svn"
+else
+    AC_MSG_RESULT(no)
+    RCSSYS="cvs"
+fi],
+[AC_MSG_RESULT(no)
+    RCSSYS="cvs"
+])
+AC_SUBST(RCSSYS)
+rd_cv_RCSSYS=$RCSSYS
 
 # Check for a preference for using mail addresses like rancid+group
 # instead of the standard rancid-group
@@ -238,8 +292,13 @@ rd_cv_lg_ping_cmd=$LG_PING_CMD
 ENV_PATH="`dirname $PERLV_PATH`:`dirname $EXPECT_PATH`:`dirname $SENDMAIL`"
 ENV_PATH="$ENV_PATH:`dirname $DIRNAME`:`dirname $DIFF`"
 
-AC_PATH_PROG(CVS,cvs,no)
-ENV_PATH="$ENV_PATH:`dirname $ac_cv_path_CVS`"
+if test $RCSSYS = "cvs" ; then
+    AC_PATH_PROG(CVS,cvs,no)
+    ENV_PATH="$ENV_PATH:`dirname $ac_cv_path_CVS`"
+else
+    AC_PATH_PROG(SVN,svn,no)
+    ENV_PATH="$ENV_PATH:`dirname $ac_cv_path_SVN`"
+fi
 AC_PATH_PROG(COMM,comm,no)
 ENV_PATH="$ENV_PATH:`dirname $ac_cv_path_COMM`"
 AC_PATH_PROG(FIND,find,no)
@@ -278,8 +337,92 @@ AC_CONFIG_FILES(include/version.h)	# this is not a header in the sense of
 					# AC_CONFIG_HEADERS will cause
 					# autoheader to overwrite it, while all
 					# want is simple variable replacement
+# autoheader bits
+AH_TOP([
+#ifndef	CONFIG_H
+#define	CONFIG_H	1
+])
+AH_BOTTOM([
+
+/* damned linux... */
+#ifdef LINUX
+# define _GNU_SOURCE
+#endif
+
+#ifndef __P
+# if STDC_HEADERS
+#  define __P(a)	a
+# else
+#  define __P(a)	()
+# endif
+#endif
+
+#if HAVE_STDLIB_H
+# include <stdlib.h>
+#endif
+
+#if HAVE_UNISTD_H       
+# include <unistd.h>    
+# include <sys/types.h>
+#elif HAVE_SYS_TYPES_H 
+# include <sys/types.h>
+#endif  
+
+#if HAVE_ERRNO_H
+# include <errno.h>
+#endif
+extern int		errno;
+
+#if HAVE_STRING_H
+# include <string.h>    
+#endif
+#if HAVE_STRINGS_H      
+# include <strings.h>
+#endif 
+
+#if ! HAVE_STRERROR
+# define strerror(n)	sys_errlist[n];
+#endif
+
+#if HAVE_SYS_WAIT_H 
+# include <sys/wait.h>
+#endif  
+#ifndef WEXITSTATUS
+# define WEXITSTATUS(stat_val) ((unsigned)(stat_val) >> 8)
+#endif
+#ifndef WIFEXITED
+# define WIFEXITED(stat_val) (((stat_val) & 255) == 0)
+#endif  
+
+#if HAVE_MEMSET
+# define bzero(p,s)	memset(p, 0, s)
+# define bcopy(s,d,l)	memcpy(d, s, l)
+#endif
+
+#if HAVE_INDEX && ! HAVE_STRCHR
+# define index(s,c)	strchr(s,c)
+#endif
+
+#if HAVE_SYSEXITS_H
+# include <sysexits.h>
+#else
+					/* missing sysexits.h */
+# define EX_OK		0
+# define EX_USAGE	64		/* command line usage error */
+# define EX_NOINPUT	66		/* cannot open input */
+# define EX_TEMPFAIL	75		/* temp failure */
+# define EX_OSERR	71		/* system error */
+# define EX_CANTCREAT	73		/* can't create (user) output file */
+# define EX_IOERR	74		/* input/output error */
+# define EX_CONFIG	78		/* configuration error */
+#endif
+
+#endif	/* CONFIG_H */
+])
 AC_CONFIG_HEADERS(include/config.h)
+
 AC_CONFIG_FILES(bin/control_rancid bin/par bin/rancid-fe, [chmod a+x $ac_file])
+AC_CONFIG_FILES(bin/agmrancid, [chmod a+x $ac_file])
 AC_CONFIG_FILES(bin/alogin bin/arancid, [chmod a+x $ac_file])
 AC_CONFIG_FILES(bin/blogin bin/brancid, [chmod a+x $ac_file])
 AC_CONFIG_FILES(bin/cat5rancid bin/clogin bin/rancid, [chmod a+x $ac_file])
@@ -297,6 +440,7 @@ AC_CONFIG_FILES(bin/nslogin bin/nsrancid, [chmod a+x $ac_file])
 AC_CONFIG_FILES(bin/prancid, [chmod a+x $ac_file])
 AC_CONFIG_FILES(bin/rivlogin bin/rivrancid, [chmod a+x $ac_file])
 AC_CONFIG_FILES(bin/rrancid, [chmod a+x $ac_file])
+AC_CONFIG_FILES(bin/srancid, [chmod a+x $ac_file])
 AC_CONFIG_FILES(bin/tntlogin bin/tntrancid, [chmod a+x $ac_file])
 AC_CONFIG_FILES(bin/xrancid bin/zrancid, [chmod a+x $ac_file])
 AC_CONFIG_FILES(share/rtrfilter, [chmod a+x $ac_file])

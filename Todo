@@ -1,4 +1,13 @@
+- why does hlogin fail when the host key is not yet known?  eg:
+  unix% ./hlogin procurve
+  procurve
+  spawn hpuifilter -- ssh -c 3des -x -l user procurve
+  Host key verification failed.
+
+  Error: Couldn't login
+  This happens on solaris only; linux and netbsd seem to be ok.
 - lg.conf(5) needs the query stuff documented.
+- configure OLDTIME per-group
 - could the cloginrc match function do a longest-match search instead of
   first match?
 - look at Andreas Dahl's Brocade switch collection scripts
@@ -19,7 +28,6 @@
 - fix varargs for knf in util.c
 - isis filtering for foundry?
 - hlogin hangs when the procurve does not ask for passwords
-- hlogin does not work with ssh, needs to alloc a pty?
 - share/ tool to prune cvs versions, excluding those with tags, by (all but
   latest | keep N versions | keep N days/months/years)
 - extreme collection fails for tacacs-enabled boxen due to diffs in UI - blech!
@@ -51,7 +59,6 @@
   this is clouded by the UI mess.
 - rancid needs to treat the 3600s like the 7Ks and 12Ks...
   Also, need to allow 12012s, and force 700s to not be treated like 7Ks.
-- clogin/jlogin rsh is munged
 - LG should sort routers
 - LG {requested} command additions
 	- show controllers T3 (data)
