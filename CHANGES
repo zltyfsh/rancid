@@ -1,3 +1,7 @@
+2.3.8+hemmop2:
+        clogin: moved comments to own line
+        include/version.h[.in]: added +hemmop2 to version
+
 2.3.8+hemmop1
         rancid, xrrancid: moved disabling of terminal timestamp
         prompt to clogin
