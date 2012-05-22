@@ -1,0 +1,18 @@
+Author: Nicolas DEFFAYET <nicolas-ml@deffayet.com>
+Description: Avoid "svn: Directory '<GROUP>' is out of date" message.
+
+--- a/bin/control_rancid.in
++++ b/bin/control_rancid.in
+@@ -168,6 +168,12 @@
+     fi
+ fi
+ 
++# svn update to avoid 'Out of date' error
++if [ $RCSSYS = svn ]
++then
++    svn update
++fi
++
+ # do cvs update of router.db in case anyone has fiddled.
+ $RCSSYS update router.db > $TMP 2>&1
+ grep "^C" $TMP > /dev/null

@@ -1,0 +1,41 @@
+Source: rancid
+Section: net
+Priority: optional
+Maintainer: Per Carlson <pelle@hemmop.com>
+Build-Depends: debhelper (>= 7.0.50~), expect, perl, openssh-client, cvs, 
+ inetutils-ping | ping, po-debconf, exim4 | mail-transport-agent, telnet,
+ automake
+Standards-Version: 3.9.3
+Homepage: http://www.shrubbery.net/rancid/
+
+Package: rancid
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, expect, perl, cvs | subversion,
+ passwd, openssh-client | ssh, iputils-ping | ping, 
+ debconf (>= 0.2.26) | debconf-2.0, adduser,
+ libperl4-corelibs-perl | perl (<< 5.12.3-7)
+Suggests: diffstat
+Provides: rancid-core, rancid-util
+Replaces: rancid-core (<< 2.3.2-1), rancid-util (<< 2.3.2-1)
+Breaks: rancid-core (<< 2.3.2-1), rancid-util (<< 2.3.2-1)
+Description: Really Awesome New Cisco confIg Differ
+ This is a popular ISP toolkit, based on expect and shell scripts,
+ for managing router configurations.
+ .
+ Rancid monitors a router's (or device's) configuration, including
+ software and hardware (cards, serial numbers, etc), using CVS or
+ Subversion.
+
+Package: rancid-cgi
+Architecture: all
+Depends: ${misc:Depends}, rancid, liblockfile-simple-perl
+Suggests: apache2 | httpd-cgi
+Description: looking glass CGI for rancid
+ This is a popular ISP toolkit, based on expect and shell scripts,
+ for managing router configurations.
+ Rancid monitors a router's (or device's) configuration, including
+ software and hardware (cards, serial numbers, etc), using CVS.
+ Rancid currently supports Cisco routers, Juniper routers, Catalyst
+ switches, Foundry switches, Redback NASs, and ADC EZT3 muxes.
+ This is the cgi package, a modified version of lg (Looking Glass)
+ provided from rancid team to check rancid through web interface too.

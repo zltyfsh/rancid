@@ -1,0 +1,317 @@
+Author: Roland Rosenfeld <roland@debian.org>
+Description: Comment out unknown commands .El, .Bl, and .ID in man pages.
+
+--- a/man/clogin.1
++++ b/man/clogin.1
+@@ -212,7 +212,7 @@
+ \-c option.  The default encryption type is often not supported.  See the
+ .BR ssh (1)
+ man page for details.  The default is 3des.
+-.El
++.\".El
+ .\"
+ .SH RETURNS
+ If the login script fails for any of the devices on the command-line, the
+@@ -253,7 +253,7 @@
+ to locate the
+ .IR .cloginrc
+ configuration file.
+-.El
++.\".El
+ .SH FILES
+ .ta \w'xHOME/xcloginrc  'u 
+ \fI$HOME/.cloginrc\fR   Configuration file.
+--- a/man/cloginrc.5
++++ b/man/cloginrc.5
+@@ -287,7 +287,7 @@
+ If <file> is not a full pathname, $HOME/ will be prepended.
+ .sp
+ Example: include {.cloginrc.group}
+-.El
++.\".El
+ .SH FILES
+ .br
+ .nf
+--- a/man/lg.conf.5.in
++++ b/man/lg.conf.5.in
+@@ -14,7 +14,7 @@
+ .\"
+ .SH VARIABLES
+ The following variables are used (alphabetically):
+-.Bl -tag -width flag
++.\".Bl -tag -width flag
+ .\"
+ .TP
+ .B LG_AS_REG
+@@ -135,10 +135,10 @@
+ .TP
+ Queries		...................................
+ .\"
+-.El
++.\".El
+ .\"
+ .SH ENVIRONMENT
+-.Bl -tag -width LG_CONF -compact
++.\".Bl -tag -width LG_CONF -compact
+ .TP
+ .B LG_CONF
+ Location of
+@@ -146,7 +146,7 @@
+ file.  See the
+ .IR FILES
+ section for more information.
+-.El
++.\".El
+ .\"
+ .SH ERRORS
+ .B lg.conf
+@@ -155,7 +155,7 @@
+ so its syntax follows that of perl.  Syntax errors may produce quite unexpected
+ results.
+ .SH FILES
+-.Bl -tag -width @sysconfdir@/rancid.conf -compact
++.\".Bl -tag -width @sysconfdir@/rancid.conf -compact
+ .TP
+ .B @sysconfdir@/lg.conf
+ Configuration file described here.
+@@ -164,7 +164,7 @@
+ is located by the value of the environment variable LG_CONF, in the CWD
+ (current working directory), or the sysconfdir defined when rancid was
+ installed, in that order.
+-.El
++.\".El
+ .SH "SEE ALSO"
+ .BR cloginrc (5),
+ .BR lg_intro (1),
+--- a/man/par.1
++++ b/man/par.1
+@@ -106,7 +106,7 @@
+ .B \-x
+ View rancid_par logs in real-time via an
+ .BR xterm (1).
+-.El
++.\".El
+ .SH FILES
+ .br
+ .nf
+--- a/man/rancid-run.1
++++ b/man/rancid-run.1
+@@ -131,7 +131,7 @@
+ .B $BASEDIR/etc/rancid.conf
+ .B rancid-run
+ configuration file.
+-.El
++.\".El
+ .SH "SEE ALSO"
+ .BR control_rancid (1),
+ .BR rancid.conf (5),
+--- a/man/rancid.1
++++ b/man/rancid.1
+@@ -148,7 +148,7 @@
+ from rancid.
+ If this file's name ('ip dhcp database') matches the regex
+ dhcp_[^[:space:].]\.txt, it will be filtered.
+-.Pp
++.PP
+ For Catalyst switches running CatOS, type
+ .B cat5,
+ the prompt must end with '>'.
+--- a/man/rancid.conf.5.in
++++ b/man/rancid.conf.5.in
+@@ -26,7 +26,7 @@
+ .SH VARIABLES
+ The following variables are used (listed alphabetically):
+ .PP
+-.Bl -tag -width flag
++.\".Bl -tag -width flag
+ .\"
+ .TP
+ .B ACLSORT
+@@ -252,11 +252,11 @@
+ so its syntax follows that of the bourne shell.  Errors
+ may produce quite unexpected results.
+ .SH FILES
+-.Bl -tag -width @sysconfdir@/rancid.conf -compact
++.\".Bl -tag -width @sysconfdir@/rancid.conf -compact
+ .TP
+ .B @sysconfdir@/rancid.conf
+ Configuration file described here.
+-.El
++.\".El
+ .\"
+ .SH "SEE ALSO"
+ .BR control_rancid (1),
+--- a/man/router.db.5
++++ b/man/router.db.5
+@@ -48,97 +48,97 @@
+ The type of device from the set:
+ .RS 8n
+ .TP
+-.ID 15n
++.\".ID 15n
+ .B agm
+ A Cisco Anomoly Guard Module (aka Riverhead).
+ Suspect that at some point the UI will become more cisco-like and it
+ can be merged with the IOS rancid module.
+ .TP
+-.ID 15n
++.\".ID 15n
+ .B alteon
+ An Alteon WebOS switches.
+ .TP
+-.ID 15n
++.\".ID 15n
+ .B arista
+ An Arista Networks device.
+ .TP
+-.ID 15n
++.\".ID 15n
+ .B avocent
+ An Avocent Cyclades console server.
+ .TP
+-.ID 15n
++.\".ID 15n
+ .B baynet
+ A Bay Networks router.
+ .TP
+-.ID 15n
++.\".ID 15n
+ .B cat5
+ A Cisco catalyst series 5000 and 4000 switches (i.e.: running the catalyst OS,
+ not IOS).
+ .TP
+-.ID 15n
++.\".ID 15n
+ .B cisco
+ A Cisco router, PIX, or switch such as the 3500XL or 6000 running IOS (or
+ IOS-like) OS, but not IOS-XR.
+ .TP
+-.ID 15n
++.\".ID 15n
+ .B cisco-nx
+ A Cisco Nexus switch/router.
+ .TP
+-.ID 15n
++.\".ID 15n
+ .B cisco-xr
+ A Cisco device running IOS-XR.
+ .TP
+-.ID 15n
++.\".ID 15n
+ .B css
+ A Cisco content services switch.
+ .TP
+-.ID 15n
++.\".ID 15n
+ .B enterasys
+ An enterasys NAS.  This is currently an alias for the
+ .B riverstone
+ device type.
+ .TP
+-.ID 15n
++.\".ID 15n
+ .B erx
+ A Juniper E-series edge router.
+ .TP
+-.ID 15n
++.\".ID 15n
+ .B extreme
+ An Extreme switch.
+ .TP
+-.ID 15n
++.\".ID 15n
+ .B ezt3
+ An ADC-Kentrox EZ-T3 mux.
+ .TP
+-.ID 15n
++.\".ID 15n
+ .B f5
+ A F5 BigIP switch.
+ .TP
+-.ID 15n
++.\".ID 15n
+ .B force10
+ A Force10 router.
+ .TP
+-.ID 15n
++.\".ID 15n
+ .B fortigate
+ A Fortinet firewall.
+ .TP
+-.ID 15n
++.\".ID 15n
+ .B foundry
+ A Foundry router, switch, or router-switch.  This includes HP
+ Procurve switches that are OEMs of Foundry products, such as the
+ HP9304M.
+ .TP
+-.ID 15n
++.\".ID 15n
+ .B hitachi
+ A Hitachi router.
+ .TP
+-.ID 15n
++.\".ID 15n
+ .B hp
+ A HP Procurve switch such as the 2524 or 4108 procurve switches.  Also see the
+ .B foundry
+ type.
+ .TP
+-.ID 15n
++.\".ID 15n
+ .B juniper
+ A Juniper router.
+ .TP
+@@ -148,35 +148,35 @@
+ .B mrtd
+ A host running the (Merit) MRTd daemon.
+ .TP
+-.ID 15n
++.\".ID 15n
+ .B netscalar
+ A Netscalar load balancer.
+ .TP
+-.ID 15n
++.\".ID 15n
+ .B netscreen
+ A Netscreen firewall.
+ .TP
+-.ID 15n
++.\".ID 15n
+ .B procket
+ A Procket router.
+ .TP
+-.ID 15n
++.\".ID 15n
+ .B redback
+ A Redback router, NAS, etc.
+ .TP
+-.ID 15n
++.\".ID 15n
+ .B riverstone
+ A Riverstone NAS or Cabletron (starting with version ~9.0.3) router.
+ .TP
+-.ID 15n
++.\".ID 15n
+ .B smc
+ A SMC switch (some Dell OEMs).
+ .TP
+-.ID 15n
++.\".ID 15n
+ .B tnt
+ A Lucent TNT.
+ .TP
+-.ID 15n
++.\".ID 15n
+ .B zebra
+ Zebra routing software.
+ .RE
+@@ -226,7 +226,7 @@
+ defined in the variable
+ .I LIST_OF_GROUPS
+ within \fI$BASEDIR/etc/rancid.conf\fR.
+-.El
++.\".El
+ .SH "SEE ALSO"
+ .BR control_rancid (1),
+ .BR rancid (1),
